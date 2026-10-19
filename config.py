@@ -46,36 +46,38 @@ SIM_BALANCE_FILE = "sim_balance.json"                 # File penyimpan saldo sim
 # SISTEM AUTO-COMPOUNDING TIERED & STEP-DOWN RULE (V2.3)
 # ==========================================================
 ENABLE_AUTO_COMPOUND = os.getenv("ENABLE_AUTO_COMPOUND", "True").lower() == "true"
+MAX_COMPOUND_BET = float(os.getenv("MAX_COMPOUND_BET", "5.0"))  # Batas maksimal taruhan: $5.00 USDT
 
 # Skema Level Compounding: (Batas Saldo Minimal, Nominal Taruhan, Nama Tier)
+# Maksimal taruhan dibatasi hingga $5.00 USDT saja demi proteksi modal ketat
 # Step-Down Rule: Jika saldo turun di bawah batas tier, taruhan otomatis turun (step-down) ke tier sebelumnya
 COMPOUND_TIERS = [
-    (1200.0, 50.0, "Tier 7 ($1200+ Max)"),
-    (600.0,  35.0, "Tier 6 ($600+)"),
-    (300.0,  20.0, "Tier 5 ($300+)"),
-    (150.0,  10.0, "Tier 4 ($150+)"),
-    (75.0,    5.0, "Tier 3 ($75+)"),
-    (30.0,    2.0, "Tier 2 ($30+)"),
-    (0.0,     1.0, "Tier 1 ($10+)"),
+    (75.0, 5.0, "Tier 4 ($75+ Max $5)"),
+    (50.0, 3.0, "Tier 3 ($50+)"),
+    (30.0, 2.0, "Tier 2 ($30+)"),
+    (0.0,  1.0, "Tier 1 ($10+)"),
 ]
 
 def calculate_compound_bet(balance: float) -> tuple[float, str]:
     """
     Menghitung ukuran taruhan dinamis berdasarkan saldo saat ini.
+    Maksimal taruhan dibatasi $5.00 USDT saja.
     Menerapkan Step-Down Rule secara otomatis:
     - Jika saldo naik melewati batas tier -> taruhan naik ke tier berikutnya.
     - Jika saldo turun di bawah batas tier -> taruhan otomatis turun (step-down)
       untuk melindungi modal dari drawdown.
     """
     if not ENABLE_AUTO_COMPOUND:
-        return BET_AMOUNT_USDT, "Fixed"
+        return min(BET_AMOUNT_USDT, MAX_COMPOUND_BET), "Fixed"
 
     for min_bal, bet_amt, tier_name in COMPOUND_TIERS:
         if balance >= min_bal:
-            actual_bet = min(bet_amt, balance) if balance > 0 else bet_amt
+            capped_bet = min(bet_amt, MAX_COMPOUND_BET)
+            actual_bet = min(capped_bet, balance) if balance > 0 else capped_bet
             return actual_bet, tier_name
 
-    return BET_AMOUNT_USDT, "Tier 1 ($10+)"
+    return min(BET_AMOUNT_USDT, MAX_COMPOUND_BET), "Tier 1 ($10+)"
+
 
 # Parameter Strategi Late-Sniper (BTC 5 Menit)
 # Eksekusi dilakukan di sisa 75 detik terakhir sebelum kedaluwarsa
