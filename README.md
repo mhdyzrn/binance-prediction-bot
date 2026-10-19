@@ -4,7 +4,7 @@ Bot trading otomatis untuk pasar prediksi Binance menggunakan Python.
 
 ## Fitur Utama (V2.3 Compounding Edition)
 
-- **Auto-Compounding & Step-Down Rule (Max $5):** Ukuran taruhan membesar otomatis secara bertingkat seiring bertambahnya saldo ($10+ ➔ $1, $30+ ➔ $2, $50+ ➔ $3, $75+ ➔ Max $5 USDT), dan otomatis turun (*step-down*) jika saldo mengalami penurunan demi melindungi modal dari drawdown.
+- **Auto-Compounding & Step-Down Rule (Max $5):** Ukuran taruhan membesar otomatis secara bertingkat seiring bertambahnya saldo dengan rentang aman ($10+ ➔ $1, $50+ ➔ $2, $100+ ➔ $3, $200+ ➔ Max $5 USDT), dan otomatis turun (*step-down*) jika saldo mengalami penurunan demi melindungi modal dari drawdown.
 - **Presisi Strike 5M Open:** Mengambil harga pembukaan (*open price*) candlestick 5M resmi Binance Vision agar strike price 100% akurat meski bot dinyalakan di tengah ronde.
 - **Strict Sniper Filter (Anti-Noise):** Mencegah taruhan spekulatif jika selisih harga < $15 demi menjaga winrate dan modal kecil ($10).
 - **Native RSI-14 Momentum Guard:** Mengukur momentum 1-menit secara native untuk menolak sinyal beli di kondisi jenuh (*overbought/oversold*).

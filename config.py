@@ -48,15 +48,19 @@ SIM_BALANCE_FILE = "sim_balance.json"                 # File penyimpan saldo sim
 ENABLE_AUTO_COMPOUND = os.getenv("ENABLE_AUTO_COMPOUND", "True").lower() == "true"
 MAX_COMPOUND_BET = float(os.getenv("MAX_COMPOUND_BET", "5.0"))  # Batas maksimal taruhan: $5.00 USDT
 
-# Skema Level Compounding: (Batas Saldo Minimal, Nominal Taruhan, Nama Tier)
-# Maksimal taruhan dibatasi hingga $5.00 USDT saja demi proteksi modal ketat
+# Skema Level Compounding dengan Jarak Lebih Lebar (Buffer Aman Anti-Drawdown):
+# Tier 1: Saldo < $50.00    ➔ Bet $1.00 USDT
+# Tier 2: Saldo $50 - $99   ➔ Bet $2.00 USDT (Posisi saldo sekarang $66.41 ada di sini)
+# Tier 3: Saldo $100 - $199 ➔ Bet $3.00 USDT
+# Tier 4: Saldo >= $200.00  ➔ Bet $5.00 USDT (Batas Maksimal Terkunci)
 # Step-Down Rule: Jika saldo turun di bawah batas tier, taruhan otomatis turun (step-down) ke tier sebelumnya
 COMPOUND_TIERS = [
-    (75.0, 5.0, "Tier 4 ($75+ Max $5)"),
-    (50.0, 3.0, "Tier 3 ($50+)"),
-    (30.0, 2.0, "Tier 2 ($30+)"),
-    (0.0,  1.0, "Tier 1 ($10+)"),
+    (200.0, 5.0, "Tier 4 ($200+ Max $5)"),
+    (100.0, 3.0, "Tier 3 ($100+)"),
+    (50.0,  2.0, "Tier 2 ($50+)"),
+    (0.0,   1.0, "Tier 1 ($10+)"),
 ]
+
 
 def calculate_compound_bet(balance: float) -> tuple[float, str]:
     """
