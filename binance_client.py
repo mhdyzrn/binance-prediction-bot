@@ -510,9 +510,16 @@ class PredictionEngine:
         prob_naik_pct = int(max(10, min(90, round(base_naik * 100))))
         prob_turun_pct = 100 - prob_naik_pct
 
-        # Multiplier Payout 1 USDT (seperti di aplikasi Binance)
-        payout_naik_1usdt = round(1.0 / (prob_naik_pct / 100.0) * 0.98, 2) if prob_naik_pct > 0 else 1.0
-        payout_turun_1usdt = round(1.0 / (prob_turun_pct / 100.0) * 0.98, 2) if prob_turun_pct > 0 else 1.0
+        # Multiplier Payout rasio per 1 USDT (seperti di aplikasi Binance)
+        payout_naik_mult = round(1.0 / (prob_naik_pct / 100.0) * 0.98, 2) if prob_naik_pct > 0 else 1.0
+        payout_turun_mult = round(1.0 / (prob_turun_pct / 100.0) * 0.98, 2) if prob_turun_pct > 0 else 1.0
+
+        current_bal = self.get_balance()
+        bet_amount, compound_tier = config.calculate_compound_bet(current_bal)
+
+        # Estimasi total perolehan USDT jika menang sesuai nominal taruhan (bet_amount) saat ini
+        win_naik_usdt = round(bet_amount * payout_naik_mult, 2)
+        win_turun_usdt = round(bet_amount * payout_turun_mult, 2)
 
         # Countdown format MM:SS
         mins = seconds_left // 60
@@ -524,8 +531,6 @@ class PredictionEngine:
         wins = sum(1 for h in self.history if h.get("won"))
         win_rate = (wins / total_trades * 100) if total_trades > 0 else 0.0
         net_pnl = sum(h.get("profit", 0.0) for h in self.history)
-        current_bal = self.get_balance()
-        bet_amount, compound_tier = config.calculate_compound_bet(current_bal)
 
         return {
             "title": f"{config.TARGET_ASSET} Naik atau Turun dalam {config.ROUND_MINUTES} menit",
@@ -538,11 +543,14 @@ class PredictionEngine:
             "countdown_str": countdown_str,
             "prob_naik": prob_naik_pct,
             "prob_turun": prob_turun_pct,
-            "payout_naik": payout_naik_1usdt,
-            "payout_turun": payout_turun_1usdt,
+            "payout_naik": payout_naik_mult,
+            "payout_turun": payout_turun_mult,
+            "win_naik_usdt": win_naik_usdt,
+            "win_turun_usdt": win_turun_usdt,
             "balance_usdt": current_bal,
             "bet_amount": bet_amount,
             "compound_tier": compound_tier,
+
             "is_online": self.is_online,
             "stale_seconds": stale_seconds,
             "rsi": self.cached_rsi,

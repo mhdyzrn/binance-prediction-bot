@@ -48,8 +48,10 @@ class BinanceAppPredictionBot:
         win_rate = (wins / total_trades * 100) if total_trades > 0 else 0.0
         net_pnl = m.get("net_pnl", 0.0)
 
-        p_naik_str = f"Win {m['payout_naik']:.2f} USDT"
-        p_turun_str = f"Win {m['payout_turun']:.2f} USDT"
+        win_naik = m.get("win_naik_usdt", m["payout_naik"] * m.get("bet_amount", config.BET_AMOUNT_USDT))
+        win_turun = m.get("win_turun_usdt", m["payout_turun"] * m.get("bet_amount", config.BET_AMOUNT_USDT))
+        p_naik_str = f"Win {win_naik:.2f} USDT"
+        p_turun_str = f"Win {win_turun:.2f} USDT"
         prob_naik_str = f"{m['prob_naik']}%"
         prob_turun_str = f"{m['prob_turun']}%"
 
