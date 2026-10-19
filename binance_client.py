@@ -352,7 +352,6 @@ class PredictionEngine:
     def __init__(self, client: BinanceClient):
         self.client = client
         self.is_real = not config.SIMULATION_MODE
-        self.virtual_balance = config.INITIAL_VIRTUAL_BALANCE
         self.cached_real_balance = 0.0
         self.last_balance_check = 0.0
         self.last_price_timestamp = time.time()
@@ -364,6 +363,11 @@ class PredictionEngine:
         # Riwayat transaksi tersimpan permanen di file
         self.history_file = config.HISTORY_FILE
         self.history: List[Dict[str, Any]] = self._load_history()
+
+        # Saldo simulasi tersimpan permanen agar tidak ter-reset jika tidak habis
+        self.sim_balance_file = config.SIM_BALANCE_FILE
+        self.virtual_balance = self._load_virtual_balance()
+
 
         # State RSI & Proteksi Cooldown
         self.cached_rsi: Optional[float] = None
@@ -400,6 +404,32 @@ class PredictionEngine:
                 json.dump(self.history[-200:], f, indent=2)
         except Exception:
             pass
+
+    def _load_virtual_balance(self) -> float:
+        """
+        Memuat saldo simulasi tersimpan dari disk agar tidak ter-reset jika saldo belum habis.
+        Jika saldo tersisa < taruhan minimal (saldo habis), barulah di-reset kembali ke saldo awal ($10).
+        """
+        if os.path.exists(self.sim_balance_file):
+            try:
+                with open(self.sim_balance_file, "r") as f:
+                    data = json.load(f)
+                    bal = float(data.get("virtual_balance", config.INITIAL_VIRTUAL_BALANCE))
+                    # Jika saldo masih cukup untuk bertaruh (belum habis), jangan reset!
+                    if bal >= config.BET_AMOUNT_USDT:
+                        return round(bal, 2)
+            except Exception:
+                pass
+        return config.INITIAL_VIRTUAL_BALANCE
+
+    def _save_virtual_balance(self):
+        """Menyimpan saldo simulasi ke disk"""
+        try:
+            with open(self.sim_balance_file, "w") as f:
+                json.dump({"virtual_balance": round(self.virtual_balance, 2), "updated_at": time.time()}, f, indent=2)
+        except Exception:
+            pass
+
 
     def get_balance(self, force_refresh: bool = False) -> float:
         """Mengambil saldo (Riil jika mode LIVE dengan caching 30s & safe retain, Virtual jika mode SIMULASI)"""
@@ -539,9 +569,11 @@ class PredictionEngine:
         # Catat posisi aktif
         if not self.is_real:
             self.virtual_balance = round(self.virtual_balance - amount_usdt, 2)
+            self._save_virtual_balance()
 
+        expiry_id = self.current_round["expiry_str"] if self.current_round else "SIM-ROUND"
         pos = {
-            "expiry_str": self.current_round["expiry_str"],
+            "expiry_str": expiry_id,
             "direction": direction,
             "amount": amount_usdt,
             "payout_multiplier": payout_multiplier,
@@ -566,6 +598,7 @@ class PredictionEngine:
 
             if not self.is_real:
                 self.virtual_balance = round(self.virtual_balance + payout, 2)
+                self._save_virtual_balance()
 
             # Hitung kekalahan berturut-turut untuk proteksi cooldown
             if won:

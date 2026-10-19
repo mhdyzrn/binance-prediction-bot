@@ -44,6 +44,7 @@ venv.bak/
 *.log
 logs/
 trade_history.json
+sim_balance.json
 
 # IDE / Editor configuration
 .idea/

@@ -39,7 +39,8 @@ TARGET_ASSET = "BTC"                                # Nama tampilan
 TARGET_SYMBOL = "BTCUSDT"                           # Pasangan pasar spot
 ROUND_MINUTES = 5                                   # Durasi ronde 5 menit
 BET_AMOUNT_USDT = float(os.getenv("BET_AMOUNT", "1.0"))  # Nominal taruhan (default 1 USDT)
-INITIAL_VIRTUAL_BALANCE = 50.0                      # Saldo awal simulasi (jika mode simulasi)
+INITIAL_VIRTUAL_BALANCE = float(os.getenv("INITIAL_BALANCE", "10.0"))  # Saldo awal simulasi: $10.0
+SIM_BALANCE_FILE = "sim_balance.json"                 # File penyimpan saldo simulasi agar tidak ter-reset
 
 # Parameter Strategi Late-Sniper (BTC 5 Menit)
 # Eksekusi dilakukan di sisa 75 detik terakhir sebelum kedaluwarsa

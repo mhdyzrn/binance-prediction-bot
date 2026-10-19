@@ -198,7 +198,7 @@ class BinanceAppPredictionBot:
                     sys.exit(1)
         else:
             print("\033[1;93mMode Terpilih: SIMULASI (Paper Trading)\033[0m")
-            print(f"Saldo Virtual Awal: {self.engine.get_balance():.2f} USDT")
+            print(f"Saldo Simulasi: {self.engine.get_balance():.2f} USDT (Tersimpan otomatis)")
             time.sleep(1.0)
 
     def run(self):
