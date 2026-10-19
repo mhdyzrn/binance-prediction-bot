@@ -1,4 +1,6 @@
 import time
+import os
+import json
 import hmac
 import hashlib
 import requests
@@ -69,6 +71,67 @@ class BinanceClient:
         if last_err:
             raise last_err
         raise ConnectionError("Gagal mengambil harga BTC dari semua endpoint mirror Binance")
+
+    def get_klines(self, symbol: str = config.TARGET_SYMBOL, interval: str = "1m", limit: int = 20) -> List[Any]:
+        """Mengambil data candlestick resmi dari Binance Vision / mirror dengan failover"""
+        endpoints = [
+            f"{self.market_data_url}/api/v3/klines",
+            f"{self.base_url}/api/v3/klines",
+            "https://api1.binance.com/api/v3/klines"
+        ]
+        for ep in endpoints:
+            try:
+                resp = self.session.get(ep, params={"symbol": symbol, "interval": interval, "limit": limit}, timeout=(2.0, 3.5))
+                if resp.status_code == 200:
+                    return resp.json()
+            except Exception:
+                continue
+        return []
+
+    def get_current_5m_strike(self, symbol: str = config.TARGET_SYMBOL) -> Optional[float]:
+        """
+        Mengambil harga OPEN dari candlestick 5 menit yang sedang berjalan sebagai Strike Price resmi.
+        Ini memastikan Strike Price 100% presisi dan sinkron dengan candle Binance,
+        bahkan jika bot dinyalakan di tengah-tengah ronde (misal menit ke-2 atau ke-3).
+        """
+        try:
+            klines = self.get_klines(symbol=symbol, interval=f"{config.ROUND_MINUTES}m", limit=1)
+            if klines and len(klines) > 0:
+                return float(klines[0][1])  # kline index 1 adalah open price
+        except Exception:
+            pass
+        return None
+
+    def calculate_rsi(self, symbol: str = config.TARGET_SYMBOL, period: int = config.RSI_PERIOD) -> Optional[float]:
+        """
+        Menghitung Indikator RSI (Relative Strength Index) 14 periode pada grafik 1 menit
+        secara native dalam Python (tanpa membutuhkan library eksternal/berat di Termux).
+        """
+        try:
+            klines = self.get_klines(symbol=symbol, interval="1m", limit=period + 10)
+            if not klines or len(klines) < period + 1:
+                return None
+            closes = [float(k[4]) for k in klines]
+            gains = []
+            losses = []
+            for i in range(1, len(closes)):
+                diff = closes[i] - closes[i - 1]
+                if diff >= 0:
+                    gains.append(diff)
+                    losses.append(0.0)
+                else:
+                    gains.append(0.0)
+                    losses.append(abs(diff))
+
+            avg_gain = sum(gains[-period:]) / period
+            avg_loss = sum(losses[-period:]) / period
+
+            if avg_loss == 0:
+                return 100.0
+            rs = avg_gain / avg_loss
+            return round(100.0 - (100.0 / (1.0 + rs)), 2)
+        except Exception:
+            return None
 
     def test_account_connection(self) -> tuple[bool, str, float]:
         """
@@ -297,15 +360,46 @@ class PredictionEngine:
         self.consecutive_errors = 0
         self.current_round: Optional[Dict[str, Any]] = None
         self.active_positions: List[Dict[str, Any]] = []
-        self.history: List[Dict[str, Any]] = []
         
-        # Inisialisasi harga awal BTC
+        # Riwayat transaksi tersimpan permanen di file
+        self.history_file = config.HISTORY_FILE
+        self.history: List[Dict[str, Any]] = self._load_history()
+
+        # State RSI & Proteksi Cooldown
+        self.cached_rsi: Optional[float] = None
+        self.last_rsi_update = 0.0
+        self.consecutive_losses = 0
+        self.cooldown_rounds_left = 0
+        
+        # Inisialisasi harga awal BTC & Strike resmi 5M
         try:
             self.live_btc_price = self.client.get_spot_price(config.TARGET_SYMBOL)
             self.last_price_timestamp = time.time()
         except Exception:
             self.live_btc_price = 81000.0
-        self.target_strike_price = self.live_btc_price
+
+        official_strike = self.client.get_current_5m_strike(config.TARGET_SYMBOL)
+        self.target_strike_price = official_strike if official_strike is not None else self.live_btc_price
+
+    def _load_history(self) -> List[Dict[str, Any]]:
+        """Memuat riwayat transaksi dari disk agar statistik 24 jam tidak hilang saat restart"""
+        if os.path.exists(self.history_file):
+            try:
+                with open(self.history_file, "r") as f:
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        return data
+            except Exception:
+                pass
+        return []
+
+    def _save_history(self):
+        """Menyimpan riwayat transaksi ke disk"""
+        try:
+            with open(self.history_file, "w") as f:
+                json.dump(self.history[-200:], f, indent=2)
+        except Exception:
+            pass
 
     def get_balance(self, force_refresh: bool = False) -> float:
         """Mengambil saldo (Riil jika mode LIVE dengan caching 30s & safe retain, Virtual jika mode SIMULASI)"""
@@ -348,13 +442,24 @@ class PredictionEngine:
 
         stale_seconds = int(now - self.last_price_timestamp)
 
+        # Update RSI secara berkala (tiap 5 detik, atau tiap 2 detik jika sudah masuk zona sniper)
+        if (now - self.last_rsi_update > 5) or (seconds_left <= config.SNIPER_TRIGGER_SECONDS + 5 and now - self.last_rsi_update > 2):
+            val_rsi = self.client.calculate_rsi(config.TARGET_SYMBOL, config.RSI_PERIOD)
+            if val_rsi is not None:
+                self.cached_rsi = val_rsi
+            self.last_rsi_update = now
+
         # Jika masuk ronde 5 menit baru
         if not self.current_round or self.current_round["expiry_timestamp"] != expiry_timestamp:
             if self.current_round:
                 self._resolve_round(self.live_btc_price)
+                if self.cooldown_rounds_left > 0:
+                    self.cooldown_rounds_left -= 1
 
-            # Kunci harga target strike di awal ronde 5 menit
-            self.target_strike_price = self.live_btc_price
+            # Ambil harga strike resmi dari candlestick 5 menit Binance
+            official_strike = self.client.get_current_5m_strike(config.TARGET_SYMBOL)
+            self.target_strike_price = official_strike if official_strike is not None else self.live_btc_price
+
             self.current_round = {
                 "title": f"{config.TARGET_ASSET} Naik atau Turun dalam {config.ROUND_MINUTES} menit",
                 "round_id": f"BTC-{expiry_dt.strftime('%H%M')}",
@@ -384,6 +489,12 @@ class PredictionEngine:
         secs = seconds_left % 60
         countdown_str = f"{mins:02d}:{secs:02d}"
 
+        # Statistik akumulatif sesi
+        total_trades = len(self.history)
+        wins = sum(1 for h in self.history if h.get("won"))
+        win_rate = (wins / total_trades * 100) if total_trades > 0 else 0.0
+        net_pnl = sum(h.get("profit", 0.0) for h in self.history)
+
         return {
             "title": f"{config.TARGET_ASSET} Naik atau Turun dalam {config.ROUND_MINUTES} menit",
             "expiry_str": expiry_str,
@@ -399,7 +510,15 @@ class PredictionEngine:
             "payout_turun": payout_turun_1usdt,
             "balance_usdt": self.get_balance(),
             "is_online": self.is_online,
-            "stale_seconds": stale_seconds
+            "stale_seconds": stale_seconds,
+            "rsi": self.cached_rsi,
+            "in_cooldown": (self.cooldown_rounds_left > 0),
+            "cooldown_rounds_left": self.cooldown_rounds_left,
+            "consecutive_losses": self.consecutive_losses,
+            "total_trades": total_trades,
+            "wins": wins,
+            "win_rate": win_rate,
+            "net_pnl": round(net_pnl, 2)
         }
 
     def place_order(self, direction: str, amount_usdt: float, payout_multiplier: float) -> Dict[str, Any]:
@@ -436,7 +555,7 @@ class PredictionEngine:
         return {"success": True, "msg": f"Order {direction} terpasang"}
 
     def _resolve_round(self, final_price: float):
-        """Menyelesaikan ronde dan menghitung payout kemenangan"""
+        """Menyelesaikan ronde, menghitung payout kemenangan, dan status cooldown"""
         winning_dir = "Naik" if final_price >= self.target_strike_price else "Turun"
         
         remaining = []
@@ -448,12 +567,25 @@ class PredictionEngine:
             if not self.is_real:
                 self.virtual_balance = round(self.virtual_balance + payout, 2)
 
+            # Hitung kekalahan berturut-turut untuk proteksi cooldown
+            if won:
+                self.consecutive_losses = 0
+            else:
+                self.consecutive_losses += 1
+                if self.consecutive_losses >= config.MAX_CONSECUTIVE_LOSS:
+                    self.cooldown_rounds_left = config.COOLDOWN_ROUNDS
+
             self.history.append({
                 "round": pos["expiry_str"][-8:],
                 "direction": pos["direction"],
                 "won": won,
                 "profit": profit,
                 "payout": payout,
+                "strike": pos.get("strike_price"),
+                "final_price": final_price,
                 "is_real": pos.get("is_real", False)
             })
+
         self.active_positions = remaining
+        self._save_history()
+

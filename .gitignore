@@ -40,9 +40,10 @@ venv.bak/
 !.env.example
 *.env
 
-# Logs
+# Logs & Trade History
 *.log
 logs/
+trade_history.json
 
 # IDE / Editor configuration
 .idea/

@@ -43,7 +43,21 @@ INITIAL_VIRTUAL_BALANCE = 50.0                      # Saldo awal simulasi (jika 
 
 # Parameter Strategi Late-Sniper (BTC 5 Menit)
 # Eksekusi dilakukan di sisa 75 detik terakhir sebelum kedaluwarsa
-SNIPER_TRIGGER_SECONDS = 75                         # Jendela eksekusi: sisa 75 detik (01:15)
-SNIPER_DEADLINE_SECONDS = 10                        # Batas akhir: sisa 10 detik (00:10)
-SNIPER_MIN_DIFF = 10.0                              # Minimal selisih harga BTC ($10 selisih dari strike)
-LOOP_INTERVAL_SECONDS = 1                           # Refresh rate 1 detik
+SNIPER_TRIGGER_SECONDS = int(os.getenv("SNIPER_TRIGGER_SECONDS", "75"))    # Jendela eksekusi: sisa 75 detik (01:15)
+SNIPER_DEADLINE_SECONDS = int(os.getenv("SNIPER_DEADLINE_SECONDS", "10"))  # Batas akhir: sisa 10 detik (00:10)
+SNIPER_MIN_DIFF = float(os.getenv("SNIPER_MIN_DIFF", "15.0"))              # Minimal selisih harga BTC ($15) untuk menghindari noise
+
+# Parameter Indikator RSI (1M timeframe)
+RSI_PERIOD = 14                                       # Periode RSI 14
+RSI_OVERBOUGHT = 78.0                                 # Tahan sinyal NAIK jika RSI > 78 (rawan pembalikan turun)
+RSI_OVERSOLD = 22.0                                   # Tahan sinyal TURUN jika RSI < 22 (rawan pantulan naik)
+
+# Proteksi Kekalahan Beruntun (Cooldown untuk pengujian 24 Jam)
+# Catatan: Daily Stop-Loss dan Daily Take-Profit dinonaktifkan sesuai permintaan pengujian 24 jam
+MAX_CONSECUTIVE_LOSS = 2                              # Jika 2x loss beruntun, jeda 1 ronde untuk hindari market liar
+COOLDOWN_ROUNDS = 1                                   # Jumlah ronde istirahat saat cooldown aktif (1 ronde = 5 menit)
+
+# Penyimpanan Histori Transaksi Permanen
+HISTORY_FILE = "trade_history.json"                   # Lokasi file riwayat transaksi
+LOOP_INTERVAL_SECONDS = 1                             # Refresh rate interval dasar
+

@@ -2,14 +2,15 @@
 
 Bot trading otomatis untuk pasar prediksi Binance menggunakan Python.
 
-## Fitur Utama
+## Fitur Utama (V2.1 Sniper Edition)
 
-- **Live Market Data:** Menggunakan feed resmi Binance Vision yang tahan blokir ISP Indonesia.
-- **Signal Engine Berbasis Probabilitas & RSI:** Menghitung fair probability vs harga share orderbook untuk menemukan harga diskon (*mispriced outcome*).
-- **Strategi Maker (0% Fee):** Selalu memasang Limit Order agar tidak terkena fee taker.
-- **Early Take-Profit:** Menjual share sebelum ronde selesai jika harga sudah naik signifikan (+50%) untuk mengunci profit instan.
-- **Paper Trading / Mode Simulasi:** Siap diuji langsung dengan saldo virtual $50 tanpa resiko uang sungguhan.
-- **Interactive Dashboard:** Menampilkan ronde aktif, harga spot live BTC/USDT, strike target, orderbook, posisi terbuka, dan histori profit/loss.
+- **Presisi Strike 5M Open:** Mengambil harga pembukaan (*open price*) candlestick 5M resmi Binance Vision agar strike price 100% akurat meski bot dinyalakan di tengah ronde.
+- **Strict Sniper Filter (Anti-Noise):** Mencegah taruhan spekulatif jika selisih harga < $15 demi menjaga winrate dan modal kecil ($10).
+- **Native RSI-14 Momentum Guard:** Mengukur momentum 1-menit secara native untuk menolak sinyal beli di kondisi jenuh (*overbought/oversold*).
+- **Proteksi Kekalahan Beruntun (Cooldown):** Jeda otomatis 1 ronde jika terjadi 2 kekalahan beruntun untuk melindungi saldo dari market choppy/abnormal.
+- **Log Histori Permanen:** Hasil trading tersimpan otomatis di `trade_history.json` untuk pengujian 24 jam tanpa kehilangan data saat bot dimatikan.
+- **Adaptive Polling:** Polling cepat (1 detik) di zona sniper (<75s) dan hemat baterai (2 detik) di zona observasi santai (>75s) khusus Termux HP.
+- **Interactive Dashboard:** Menampilkan ronde aktif, harga spot live, strike 5M open, RSI-14, Net PnL, Win Rate, dan notifikasi filter sinyal.
 
 ## Cara Menjalankan
 

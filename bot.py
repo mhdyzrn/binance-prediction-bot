@@ -46,11 +46,23 @@ class BinanceAppPredictionBot:
         total_trades = len(history)
         wins = sum(1 for h in history if h.get("won"))
         win_rate = (wins / total_trades * 100) if total_trades > 0 else 0.0
+        net_pnl = m.get("net_pnl", 0.0)
 
         p_naik_str = f"Win {m['payout_naik']:.2f} U"
         p_turun_str = f"Win {m['payout_turun']:.2f} U"
         prob_naik_str = f"{m['prob_naik']}%"
         prob_turun_str = f"{m['prob_turun']}%"
+
+        # Status RSI-14
+        rsi = m.get("rsi")
+        if rsi is None:
+            rsi_badge = "\033[90mMemuat...\033[0m"
+        elif rsi >= config.RSI_OVERBOUGHT:
+            rsi_badge = f"\033[1;91m{rsi:.1f} (Overbought)\033[0m"
+        elif rsi <= config.RSI_OVERSOLD:
+            rsi_badge = f"\033[1;92m{rsi:.1f} (Oversold)\033[0m"
+        else:
+            rsi_badge = f"\033[1;36m{rsi:.1f} (Netral)\033[0m"
 
         # Status Koneksi Jaringan
         is_online = m.get("is_online", True)
@@ -66,8 +78,9 @@ class BinanceAppPredictionBot:
             " \033[1;36m══════════════════════════════════════════\033[0m",
             f"  Status Jaringan : {conn_badge}",
             f"  Kedaluwarsa     : \033[1m{m['expiry_str']}\033[0m",
-            f"  Harga Strike    : \033[1;37m${m['strike_price']:,.2f}\033[0m",
-            f"  Harga Spot      : {diff_colored}",
+            f"  Strike (5M Open): \033[1;37m${m['strike_price']:,.2f}\033[0m",
+            f"  Harga Spot Live : {diff_colored}",
+            f"  Indikator RSI   : {rsi_badge}",
             f"  Hitung Mundur   : \033[1;93m{m['countdown_str']}\033[0m \033[96m{spinner_char}\033[0m",
             " ──────────────────────────────────────────",
             "  ┌──────────────────┐  ┌──────────────────┐",
@@ -78,6 +91,10 @@ class BinanceAppPredictionBot:
             " ──────────────────────────────────────────",
             f"  Saldo Akun      : \033[1;32m{m['balance_usdt']:.2f} USDT\033[0m (Bet: {config.BET_AMOUNT_USDT:.2f} U)",
         ]
+
+        # Status Cooldown jika terjadi loss beruntun
+        if m.get("in_cooldown"):
+            lines.append(f"  Proteksi Modal  : \033[1;93mCOOLDOWN ({m.get('cooldown_rounds_left')} ronde jeda)\033[0m")
 
         # Status Posisi & Sinyal Late-Sniper
         if active_pos:
@@ -93,7 +110,7 @@ class BinanceAppPredictionBot:
             elif signal["action"] == "OBSERVE":
                 pred = "▲ NAIK" if m["diff_val"] >= 0 else "▼ TURUN"
                 pred_col = "\033[1;92m" if m["diff_val"] >= 0 else "\033[1;91m"
-                lines.append(f"  Kecenderungan   : {pred_col}{pred}\033[0m (Sniper di 01:15)")
+                lines.append(f"  Kecenderungan   : {pred_col}{pred}\033[0m (Filter: Min ±${config.SNIPER_MIN_DIFF:.0f})")
                 lines.append(f"  Status Bot      : \033[90m{spinner_char} {signal['reason']}\033[0m")
             elif signal["action"] == "EXPIRED_SOON":
                 lines.append("  Sinyal Sniper   : \033[1;91m⛔ Jendela Taruhan Ditutup\033[0m")
@@ -112,9 +129,12 @@ class BinanceAppPredictionBot:
             last = history[-1]
             h_stat = "\033[1;92mWIN\033[0m" if last["won"] else "\033[1;91mLOSS\033[0m"
             p_sign = "+" if last["profit"] >= 0 else ""
+            pnl_col = "\033[1;92m" if net_pnl >= 0 else "\033[1;91m"
+            pnl_sign = "+" if net_pnl >= 0 else ""
             lines.append(" ──────────────────────────────────────────")
             lines.append(f"  Ronde Terakhir  : [{last['round']}] {last['direction'].upper()} ➔ {h_stat} ({p_sign}{last['profit']:.2f} U)")
-            lines.append(f"  Performa Bot    : \033[1;37m{wins}/{total_trades}\033[0m Menang (\033[1;93m{win_rate:.0f}%\033[0m)")
+            lines.append(f"  Performa Sesi   : \033[1;37m{wins}/{total_trades}\033[0m Menang (\033[1;93m{win_rate:.0f}%\033[0m)")
+            lines.append(f"  Net PnL Sesi    : {pnl_col}{pnl_sign}{net_pnl:.2f} USDT\033[0m")
 
         lines.append(" ──────────────────────────────────────────")
         lines.append("  \033[90m[Ctrl+C] Hentikan Bot\033[0m")
@@ -233,16 +253,33 @@ class BinanceAppPredictionBot:
                     order_notice = f"\033[93m⚠ Gangguan: {str(loop_err)[:32]}...\033[0m"
                     time.sleep(1)
 
-                time.sleep(config.LOOP_INTERVAL_SECONDS)
+                    # Adaptive sleep: 1s saat di jendela sniper (<75s), 2s saat observasi santai (>75s) untuk hemat data/baterai Termux
+                    sleep_time = config.LOOP_INTERVAL_SECONDS if market.get("seconds_left", 300) <= config.SNIPER_TRIGGER_SECONDS else 2
+                    time.sleep(sleep_time)
 
         except KeyboardInterrupt:
             self.restore_screen()
-            print("\nBot dihentikan oleh pengguna.")
+            print("\n" + "=" * 50)
+            print("          LAPORAN PENGUJIAN BOT          ")
+            print("=" * 50)
             try:
                 bal = self.engine.get_balance()
-                print(f"Saldo Akhir: {bal:.2f} USDT")
+                history = self.engine.history
+                total = len(history)
+                wins = sum(1 for h in history if h.get("won"))
+                losses = total - wins
+                winrate = (wins / total * 100) if total > 0 else 0.0
+                net_pnl = sum(h.get("profit", 0.0) for h in history)
+                pnl_sign = "+" if net_pnl >= 0 else ""
+                print(f"Saldo Akhir       : {bal:.2f} USDT")
+                print(f"Total Transaksi   : {total} Ronde")
+                print(f"Menang / Kalah    : {wins} Win / {losses} Loss")
+                print(f"Win Rate Sesi     : {winrate:.1f}%")
+                print(f"Net Profit/Loss   : {pnl_sign}{net_pnl:.2f} USDT")
+                print(f"File Log Tersimpan: {config.HISTORY_FILE}")
             except (Exception, KeyboardInterrupt):
                 pass
+            print("=" * 50 + "\n")
 
 if __name__ == "__main__":
     try:

@@ -17,7 +17,16 @@ class PredictionStrategy:
         seconds_left = market["seconds_left"]
         diff_val = market["diff_val"]
 
-        # Safeguard: Jika koneksi terputus atau data harga basi (> 5 detik)
+        # Safeguard 1: Proteksi Cooldown setelah kekalahan beruntun
+        if market.get("in_cooldown", False):
+            rounds_left = market.get("cooldown_rounds_left", 1)
+            return {
+                "action": "OBSERVE",
+                "direction": None,
+                "reason": f"Proteksi Cooldown aktif ({rounds_left} ronde jeda setelah {config.MAX_CONSECUTIVE_LOSS}x loss)"
+            }
+
+        # Safeguard 2: Jika koneksi terputus atau data harga basi (> 5 detik)
         if not market.get("is_online", True) or market.get("stale_seconds", 0) > 5:
             stale = market.get("stale_seconds", 0)
             return {
@@ -45,33 +54,49 @@ class PredictionStrategy:
             }
 
         # Fase 3: Jendela Eksekusi Sniper Aktif (01:15 s.d 00:10)
-        # Untuk BTC, jika selisih harga >= $10.0
+        rsi = market.get("rsi")
+        rsi_str = f"{rsi:.1f}" if rsi is not None else "-"
+
+        # Kasus A: Spot BTC unggul di atas target strike (Potensi NAIK)
         if diff_val >= self.min_diff:
+            # Filter RSI: Cegah beli NAIK jika pasar sedang overbought ekstrim (rawan dump/reversal)
+            if rsi is not None and rsi >= config.RSI_OVERBOUGHT:
+                return {
+                    "action": "OBSERVE",
+                    "direction": None,
+                    "reason": f"Filter RSI Jenuh Beli ({rsi_str} > {config.RSI_OVERBOUGHT}) - Tahan NAIK demi proteksi modal"
+                }
+
             return {
                 "action": "ENTER",
                 "direction": "Naik",
                 "payout": market["payout_naik"],
-                "reason": f"Sniper NAIK! Spot BTC unggul di atas target (+${diff_val:,.2f})"
+                "reason": f"Sniper NAIK! Spot unggul (+${diff_val:,.2f}) | RSI: {rsi_str}"
             }
+
+        # Kasus B: Spot BTC unggul di bawah target strike (Potensi TURUN)
         elif diff_val <= -self.min_diff:
+            # Filter RSI: Cegah beli TURUN jika pasar sedang oversold ekstrim (rawan pump/bounce)
+            if rsi is not None and rsi <= config.RSI_OVERSOLD:
+                return {
+                    "action": "OBSERVE",
+                    "direction": None,
+                    "reason": f"Filter RSI Jenuh Jual ({rsi_str} < {config.RSI_OVERSOLD}) - Tahan TURUN demi proteksi modal"
+                }
+
             return {
                 "action": "ENTER",
                 "direction": "Turun",
                 "payout": market["payout_turun"],
-                "reason": f"Sniper TURUN! Spot BTC unggul di bawah target (-${abs(diff_val):,.2f})"
+                "reason": f"Sniper TURUN! Spot unggul (-${abs(diff_val):,.2f}) | RSI: {rsi_str}"
             }
-        else:
-            # Jika selisih tipis (< $10), ikuti arah harga dominan
-            if diff_val >= 0:
-                dir_choice = "Naik"
-                payout = market["payout_naik"]
-            else:
-                dir_choice = "Turun"
-                payout = market["payout_turun"]
 
+        # Kasus C: Selisih tipis di bawah MIN_DIFF (< $15)
+        # SANGAT KRUSIAL UNTUK MODAL $10: TAHAN DIRI & JANGAN MEMAKSAKAN ORDER PADA PASAR NOISE!
+        else:
             return {
-                "action": "ENTER",
-                "direction": dir_choice,
-                "payout": payout,
-                "reason": f"Sniper Konfirmasi Tipis: Ambil {dir_choice}"
+                "action": "OBSERVE",
+                "direction": None,
+                "reason": f"Selisih tipis (${abs(diff_val):,.2f} < ${self.min_diff:.0f}) - Menahan order demi proteksi modal"
             }
+
