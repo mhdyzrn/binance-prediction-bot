@@ -48,8 +48,8 @@ class BinanceAppPredictionBot:
         win_rate = (wins / total_trades * 100) if total_trades > 0 else 0.0
         net_pnl = m.get("net_pnl", 0.0)
 
-        p_naik_str = f"Win {m['payout_naik']:.2f} U"
-        p_turun_str = f"Win {m['payout_turun']:.2f} U"
+        p_naik_str = f"Win {m['payout_naik']:.2f} USDT"
+        p_turun_str = f"Win {m['payout_turun']:.2f} USDT"
         prob_naik_str = f"{m['prob_naik']}%"
         prob_turun_str = f"{m['prob_turun']}%"
 
@@ -89,7 +89,7 @@ class BinanceAppPredictionBot:
             f"  │{p_naik_str:^18}│  │{p_turun_str:^18}│",
             "  └──────────────────┘  └──────────────────┘",
             " ──────────────────────────────────────────",
-            f"  Saldo Akun      : \033[1;32m{m['balance_usdt']:.2f} USDT\033[0m (Bet: {config.BET_AMOUNT_USDT:.2f} U)",
+            f"  Saldo Akun      : \033[1;32m{m['balance_usdt']:.2f} USDT\033[0m (Bet: {config.BET_AMOUNT_USDT:.2f} USDT)",
         ]
 
         # Status Cooldown jika terjadi loss beruntun
@@ -101,7 +101,7 @@ class BinanceAppPredictionBot:
             arrow = "▲" if active_pos["direction"] == "Naik" else "▼"
             dir_color = "\033[1;92m" if active_pos["direction"] == "Naik" else "\033[1;91m"
             tag = "REAL" if active_pos.get("is_real") else "SIM"
-            lines.append(f"  Posisi Aktif    : {dir_color}{arrow} {active_pos['direction'].upper()}\033[0m ({config.BET_AMOUNT_USDT:.2f} U) [{tag}]")
+            lines.append(f"  Posisi Aktif    : {dir_color}{arrow} {active_pos['direction'].upper()}\033[0m ({config.BET_AMOUNT_USDT:.2f} USDT) [{tag}]")
             lines.append(f"  Target Payout   : \033[1;93m+{active_pos['potential_win']:.2f} USDT\033[0m")
             lines.append("  Status Bot      : \033[92m✔ Order Sukses! Menunggu expiry...\033[0m")
         else:
@@ -132,9 +132,10 @@ class BinanceAppPredictionBot:
             pnl_col = "\033[1;92m" if net_pnl >= 0 else "\033[1;91m"
             pnl_sign = "+" if net_pnl >= 0 else ""
             lines.append(" ──────────────────────────────────────────")
-            lines.append(f"  Ronde Terakhir  : [{last['round']}] {last['direction'].upper()} ➔ {h_stat} ({p_sign}{last['profit']:.2f} U)")
+            lines.append(f"  Ronde Terakhir  : [{last['round']}] {last['direction'].upper()} ➔ {h_stat} ({p_sign}{last['profit']:.2f} USDT)")
             lines.append(f"  Performa Sesi   : \033[1;37m{wins}/{total_trades}\033[0m Menang (\033[1;93m{win_rate:.0f}%\033[0m)")
             lines.append(f"  Net PnL Sesi    : {pnl_col}{pnl_sign}{net_pnl:.2f} USDT\033[0m")
+
 
         lines.append(" ──────────────────────────────────────────")
         lines.append("  \033[90m[Ctrl+C] Hentikan Bot\033[0m")
