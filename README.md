@@ -2,8 +2,9 @@
 
 Bot trading otomatis untuk pasar prediksi Binance menggunakan Python.
 
-## Fitur Utama (V2.2 Sniper Edition)
+## Fitur Utama (V2.3 Compounding Edition)
 
+- **Auto-Compounding & Step-Down Rule:** Ukuran taruhan membesar otomatis secara bertingkat seiring bertambahnya saldo ($10+ ➔ $1, $30+ ➔ $2, $75+ ➔ $5, $150+ ➔ $10, dst), dan otomatis turun (*step-down*) jika saldo mengalami penurunan demi melindungi modal dari drawdown.
 - **Presisi Strike 5M Open:** Mengambil harga pembukaan (*open price*) candlestick 5M resmi Binance Vision agar strike price 100% akurat meski bot dinyalakan di tengah ronde.
 - **Strict Sniper Filter (Anti-Noise):** Mencegah taruhan spekulatif jika selisih harga < $15 demi menjaga winrate dan modal kecil ($10).
 - **Native RSI-14 Momentum Guard:** Mengukur momentum 1-menit secara native untuk menolak sinyal beli di kondisi jenuh (*overbought/oversold*).
@@ -11,7 +12,8 @@ Bot trading otomatis untuk pasar prediksi Binance menggunakan Python.
 - **Proteksi Kekalahan Beruntun (Cooldown):** Jeda otomatis 1 ronde jika terjadi 2 kekalahan beruntun untuk melindungi saldo dari market choppy/abnormal.
 - **Log Histori Permanen:** Hasil trading tersimpan otomatis di `trade_history.json` untuk pengujian 24 jam tanpa kehilangan data saat bot dimatikan.
 - **Adaptive Polling:** Polling cepat (1 detik) di zona sniper (<75s) dan hemat baterai (2 detik) di zona observasi santai (>75s) khusus Termux HP.
-- **Interactive Dashboard:** Menampilkan ronde aktif, harga spot live, strike 5M open, RSI-14, format nominal USDT lengkap, Net PnL, Win Rate, dan notifikasi filter sinyal.
+- **Interactive Dashboard:** Menampilkan level Auto-Compound, ronde aktif, harga spot live, strike 5M open, RSI-14, format USDT, Net PnL, Win Rate, dan notifikasi filter sinyal.
+
 
 ## Cara Menjalankan
 

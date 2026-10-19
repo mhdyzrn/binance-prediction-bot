@@ -524,6 +524,8 @@ class PredictionEngine:
         wins = sum(1 for h in self.history if h.get("won"))
         win_rate = (wins / total_trades * 100) if total_trades > 0 else 0.0
         net_pnl = sum(h.get("profit", 0.0) for h in self.history)
+        current_bal = self.get_balance()
+        bet_amount, compound_tier = config.calculate_compound_bet(current_bal)
 
         return {
             "title": f"{config.TARGET_ASSET} Naik atau Turun dalam {config.ROUND_MINUTES} menit",
@@ -538,7 +540,9 @@ class PredictionEngine:
             "prob_turun": prob_turun_pct,
             "payout_naik": payout_naik_1usdt,
             "payout_turun": payout_turun_1usdt,
-            "balance_usdt": self.get_balance(),
+            "balance_usdt": current_bal,
+            "bet_amount": bet_amount,
+            "compound_tier": compound_tier,
             "is_online": self.is_online,
             "stale_seconds": stale_seconds,
             "rsi": self.cached_rsi,
@@ -550,6 +554,7 @@ class PredictionEngine:
             "win_rate": win_rate,
             "net_pnl": round(net_pnl, 2)
         }
+
 
     def place_order(self, direction: str, amount_usdt: float, payout_multiplier: float) -> Dict[str, Any]:
         """Mengeksekusi taruhan (Real API atau Simulasi)"""

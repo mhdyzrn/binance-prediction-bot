@@ -38,9 +38,44 @@ BINANCE_PROXY = os.getenv("BINANCE_PROXY", "")
 TARGET_ASSET = "BTC"                                # Nama tampilan
 TARGET_SYMBOL = "BTCUSDT"                           # Pasangan pasar spot
 ROUND_MINUTES = 5                                   # Durasi ronde 5 menit
-BET_AMOUNT_USDT = float(os.getenv("BET_AMOUNT", "1.0"))  # Nominal taruhan (default 1 USDT)
+BET_AMOUNT_USDT = float(os.getenv("BET_AMOUNT", "1.0"))  # Nominal taruhan dasar (default 1 USDT)
 INITIAL_VIRTUAL_BALANCE = float(os.getenv("INITIAL_BALANCE", "10.0"))  # Saldo awal simulasi: $10.0
 SIM_BALANCE_FILE = "sim_balance.json"                 # File penyimpan saldo simulasi agar tidak ter-reset
+
+# ==========================================================
+# SISTEM AUTO-COMPOUNDING TIERED & STEP-DOWN RULE (V2.3)
+# ==========================================================
+ENABLE_AUTO_COMPOUND = os.getenv("ENABLE_AUTO_COMPOUND", "True").lower() == "true"
+
+# Skema Level Compounding: (Batas Saldo Minimal, Nominal Taruhan, Nama Tier)
+# Step-Down Rule: Jika saldo turun di bawah batas tier, taruhan otomatis turun (step-down) ke tier sebelumnya
+COMPOUND_TIERS = [
+    (1200.0, 50.0, "Tier 7 ($1200+ Max)"),
+    (600.0,  35.0, "Tier 6 ($600+)"),
+    (300.0,  20.0, "Tier 5 ($300+)"),
+    (150.0,  10.0, "Tier 4 ($150+)"),
+    (75.0,    5.0, "Tier 3 ($75+)"),
+    (30.0,    2.0, "Tier 2 ($30+)"),
+    (0.0,     1.0, "Tier 1 ($10+)"),
+]
+
+def calculate_compound_bet(balance: float) -> tuple[float, str]:
+    """
+    Menghitung ukuran taruhan dinamis berdasarkan saldo saat ini.
+    Menerapkan Step-Down Rule secara otomatis:
+    - Jika saldo naik melewati batas tier -> taruhan naik ke tier berikutnya.
+    - Jika saldo turun di bawah batas tier -> taruhan otomatis turun (step-down)
+      untuk melindungi modal dari drawdown.
+    """
+    if not ENABLE_AUTO_COMPOUND:
+        return BET_AMOUNT_USDT, "Fixed"
+
+    for min_bal, bet_amt, tier_name in COMPOUND_TIERS:
+        if balance >= min_bal:
+            actual_bet = min(bet_amt, balance) if balance > 0 else bet_amt
+            return actual_bet, tier_name
+
+    return BET_AMOUNT_USDT, "Tier 1 ($10+)"
 
 # Parameter Strategi Late-Sniper (BTC 5 Menit)
 # Eksekusi dilakukan di sisa 75 detik terakhir sebelum kedaluwarsa

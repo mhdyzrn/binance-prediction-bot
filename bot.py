@@ -89,7 +89,8 @@ class BinanceAppPredictionBot:
             f"  │{p_naik_str:^18}│  │{p_turun_str:^18}│",
             "  └──────────────────┘  └──────────────────┘",
             " ──────────────────────────────────────────",
-            f"  Saldo Akun      : \033[1;32m{m['balance_usdt']:.2f} USDT\033[0m (Bet: {config.BET_AMOUNT_USDT:.2f} USDT)",
+            f"  Saldo Akun      : \033[1;32m{m['balance_usdt']:.2f} USDT\033[0m",
+            f"  Auto-Compound   : \033[1;96m{m.get('compound_tier', 'Tier 1')}\033[0m ➔ Bet: \033[1;33m{m.get('bet_amount', config.BET_AMOUNT_USDT):.2f} USDT\033[0m" if config.ENABLE_AUTO_COMPOUND else f"  Ukuran Taruhan  : \033[1;33m{m.get('bet_amount', config.BET_AMOUNT_USDT):.2f} USDT\033[0m (Fixed)",
         ]
 
         # Status Cooldown jika terjadi loss beruntun
@@ -101,7 +102,8 @@ class BinanceAppPredictionBot:
             arrow = "▲" if active_pos["direction"] == "Naik" else "▼"
             dir_color = "\033[1;92m" if active_pos["direction"] == "Naik" else "\033[1;91m"
             tag = "REAL" if active_pos.get("is_real") else "SIM"
-            lines.append(f"  Posisi Aktif    : {dir_color}{arrow} {active_pos['direction'].upper()}\033[0m ({config.BET_AMOUNT_USDT:.2f} USDT) [{tag}]")
+            pos_amt = active_pos.get("amount", m.get("bet_amount", config.BET_AMOUNT_USDT))
+            lines.append(f"  Posisi Aktif    : {dir_color}{arrow} {active_pos['direction'].upper()}\033[0m ({pos_amt:.2f} USDT) [{tag}]")
             lines.append(f"  Target Payout   : \033[1;93m+{active_pos['potential_win']:.2f} USDT\033[0m")
             lines.append("  Status Bot      : \033[92m✔ Order Sukses! Menunggu expiry...\033[0m")
         else:
@@ -198,8 +200,12 @@ class BinanceAppPredictionBot:
                     print("     SIMULATION_MODE=True\n")
                     sys.exit(1)
         else:
-            print("\033[1;93mMode Terpilih: SIMULASI (Paper Trading)\033[0m")
-            print(f"Saldo Simulasi: {self.engine.get_balance():.2f} USDT (Tersimpan otomatis)")
+            bal = self.engine.get_balance()
+            bet_amt, tier_name = config.calculate_compound_bet(bal)
+            comp_info = f"ON ({tier_name} ➔ Bet {bet_amt:.2f} USDT | Step-Down Aktif)" if config.ENABLE_AUTO_COMPOUND else "OFF (Fixed Bet)"
+            print("\033[1;93mMode Terpilih : SIMULASI (Paper Trading)\033[0m")
+            print(f"Saldo Simulasi: {bal:.2f} USDT (Tersimpan otomatis)")
+            print(f"Auto-Compound : \033[1;96m{comp_info}\033[0m")
             time.sleep(1.0)
 
     def run(self):
@@ -226,16 +232,17 @@ class BinanceAppPredictionBot:
                     if expiry_id not in self.placed_expiries and signal["action"] == "ENTER":
                         direction = signal["direction"]
                         payout_mult = market["payout_naik"] if direction == "Naik" else market["payout_turun"]
+                        bet_amt = market.get("bet_amount", config.BET_AMOUNT_USDT)
                         
                         res = self.engine.place_order(
                             direction=direction,
-                            amount_usdt=config.BET_AMOUNT_USDT,
+                            amount_usdt=bet_amt,
                             payout_multiplier=payout_mult
                         )
                         
                         if res.get("success"):
                             self.placed_expiries.add(expiry_id)
-                            order_notice = f"\033[92m✔ {res.get('msg')}\033[0m"
+                            order_notice = f"\033[92m✔ {res.get('msg')} ({bet_amt:.2f} USDT)\033[0m"
                         else:
                             order_notice = f"\033[91m✘ {res.get('msg')}\033[0m"
 
