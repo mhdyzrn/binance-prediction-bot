@@ -15,6 +15,8 @@ class BinanceAppPredictionBot:
         self.strategy = PredictionStrategy()
         self.spinner_idx = 0
         self.placed_expiries = set()
+        self.failed_attempts = {}
+        self.last_order_try_time = 0.0
 
     def init_screen(self):
         sys.stdout.write("\033[2J\033[H\033[?25l")
@@ -228,27 +230,34 @@ class BinanceAppPredictionBot:
                     # Bersihkan notifikasi jika masuk ronde baru
                     if last_expiry_id and last_expiry_id != expiry_id:
                         order_notice = ""
+                        self.failed_attempts.pop(last_expiry_id, None)
                     last_expiry_id = expiry_id
 
                     # 2. Evaluasi strategi Late-Sniper
                     signal = self.strategy.evaluate_signal(market)
 
                     if expiry_id not in self.placed_expiries and signal["action"] == "ENTER":
-                        direction = signal["direction"]
-                        payout_mult = market["payout_naik"] if direction == "Naik" else market["payout_turun"]
-                        bet_amt = market.get("bet_amount", config.BET_AMOUNT_USDT)
-                        
-                        res = self.engine.place_order(
-                            direction=direction,
-                            amount_usdt=bet_amt,
-                            payout_multiplier=payout_mult
-                        )
-                        
-                        if res.get("success"):
-                            self.placed_expiries.add(expiry_id)
-                            order_notice = f"\033[92m✔ {res.get('msg')} ({bet_amt:.2f} USDT)\033[0m"
-                        else:
-                            order_notice = f"\033[91m✘ {res.get('msg')}\033[0m"
+                        now_ts = time.time()
+                        attempts = self.failed_attempts.get(expiry_id, 0)
+                        # Batasi maksimal 2 kali percobaan order per ronde dengan jeda minimal 3 detik
+                        if attempts < 2 and (now_ts - self.last_order_try_time >= 3.0):
+                            self.last_order_try_time = now_ts
+                            direction = signal["direction"]
+                            payout_mult = market["payout_naik"] if direction == "Naik" else market["payout_turun"]
+                            bet_amt = market.get("bet_amount", config.BET_AMOUNT_USDT)
+                            
+                            res = self.engine.place_order(
+                                direction=direction,
+                                amount_usdt=bet_amt,
+                                payout_multiplier=payout_mult
+                            )
+                            
+                            if res.get("success"):
+                                self.placed_expiries.add(expiry_id)
+                                order_notice = f"\033[92m✔ {res.get('msg')} ({bet_amt:.2f} USDT)\033[0m"
+                            else:
+                                self.failed_attempts[expiry_id] = attempts + 1
+                                order_notice = f"\033[91m✘ {res.get('msg')}\033[0m"
 
                     # Bersihkan daftar ronde lama
                     if len(self.placed_expiries) > 10:

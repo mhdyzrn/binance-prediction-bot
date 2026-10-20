@@ -433,13 +433,14 @@ class BinanceClient:
         # 3. Dapatkan Quote
         quote_url = f"{self.base_url}/sapi/v1/w3w/wallet/prediction/trade/get-quote"
         amount_wei = str(int(amount_usdt * 1e18))
+        slippage = getattr(config, "SLIPPAGE_BPS", 2000)
         q_params = {
             "walletAddress": wallet_addr,
             "tokenId": token_id,
             "side": "BUY",
             "amountIn": amount_wei,
             "orderType": "MARKET",
-            "slippageBps": 1200,
+            "slippageBps": slippage,
             "fundingSource": funding_source
         }
         q_params = self._sign(q_params)
@@ -451,8 +452,13 @@ class BinanceClient:
             if q_resp.status_code != 200:
                 code = q_data.get("code")
                 msg = q_data.get("msg", str(q_data))
-                if code == -9000 or "enough USDT" in msg:
-                    return {"success": False, "msg": f"Saldo USDT akun Binance tidak cukup ({msg})"}
+                msg_lower = msg.lower()
+                if "enough usdt" in msg_lower or "insufficient balance" in msg_lower:
+                    return {"success": False, "msg": f"Saldo USDT tidak cukup ({msg})"}
+                elif "liquidity" in msg_lower:
+                    return {"success": False, "msg": f"Likuiditas tipis / ronde hampir berakhir ({msg})"}
+                elif "too small" in msg_lower:
+                    return {"success": False, "msg": f"Nominal taruhan di bawah batas minimal ({msg})"}
                 return {"success": False, "msg": f"Gagal quote: {msg}"}
 
             quote_id = q_data.get("quoteId")
@@ -467,7 +473,7 @@ class BinanceClient:
                 "quoteId": quote_id,
                 "orderType": "MARKET",
                 "timeInForce": "FOK",
-                "slippageBps": 1200,
+                "slippageBps": slippage,
                 "fundingSource": funding_source
             }
             o_params = self._sign(o_params)

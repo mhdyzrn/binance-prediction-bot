@@ -86,10 +86,12 @@ def calculate_compound_bet(balance: float) -> tuple[float, str]:
 
 
 # Parameter Strategi Late-Sniper (BTC 5 Menit)
-# Eksekusi dilakukan di sisa 75 detik terakhir sebelum kedaluwarsa
-SNIPER_TRIGGER_SECONDS = int(os.getenv("SNIPER_TRIGGER_SECONDS", "75"))    # Jendela eksekusi: sisa 75 detik (01:15)
-SNIPER_DEADLINE_SECONDS = int(os.getenv("SNIPER_DEADLINE_SECONDS", "10"))  # Batas akhir: sisa 10 detik (00:10)
+# Eksekusi dilakukan di jendela sniper aman sebelum kedaluwarsa
+SNIPER_TRIGGER_SECONDS = int(os.getenv("SNIPER_TRIGGER_SECONDS", "75"))    # Jendela eksekusi mulai: sisa 75 detik (01:15)
+SNIPER_DEADLINE_SECONDS = int(os.getenv("SNIPER_DEADLINE_SECONDS", "25"))  # Batas akhir aman: sisa 25 detik (mencegah order book kosong/lack of liquidity)
 SNIPER_MIN_DIFF = float(os.getenv("SNIPER_MIN_DIFF", "15.0"))              # Minimal selisih harga BTC ($15) untuk menghindari noise
+MIN_PAYOUT_MULTIPLIER = float(os.getenv("MIN_PAYOUT_MULTIPLIER", "1.08"))  # Minimal payout 1.08x (menghindari probabilitas >92% yang kering likuiditas)
+SLIPPAGE_BPS = int(os.getenv("SLIPPAGE_BPS", "2000"))                      # Toleransi slippage: default 20% (2000 basis points)
 
 # Parameter Indikator RSI (1M timeframe)
 RSI_PERIOD = 14                                       # Periode RSI 14

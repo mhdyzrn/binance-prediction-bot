@@ -67,10 +67,19 @@ class PredictionStrategy:
                     "reason": f"Filter RSI Jenuh Beli ({rsi_str} > {config.RSI_OVERBOUGHT}) - Tahan NAIK demi proteksi modal"
                 }
 
+            # Filter Likuiditas & Min Payout (Cegah taruhan di harga ekstrim >92% yang kering likuiditas)
+            payout = market.get("payout_naik", 1.0)
+            if payout < getattr(config, "MIN_PAYOUT_MULTIPLIER", 1.08):
+                return {
+                    "action": "OBSERVE",
+                    "direction": None,
+                    "reason": f"Likuiditas tipis / Payout rendah ({payout:.2f}x < {config.MIN_PAYOUT_MULTIPLIER:.2f}x) - Tahan order"
+                }
+
             return {
                 "action": "ENTER",
                 "direction": "Naik",
-                "payout": market["payout_naik"],
+                "payout": payout,
                 "reason": f"Sniper NAIK! Spot unggul (+${diff_val:,.2f}) | RSI: {rsi_str}"
             }
 
@@ -84,10 +93,19 @@ class PredictionStrategy:
                     "reason": f"Filter RSI Jenuh Jual ({rsi_str} < {config.RSI_OVERSOLD}) - Tahan TURUN demi proteksi modal"
                 }
 
+            # Filter Likuiditas & Min Payout (Cegah taruhan di harga ekstrim >92% yang kering likuiditas)
+            payout = market.get("payout_turun", 1.0)
+            if payout < getattr(config, "MIN_PAYOUT_MULTIPLIER", 1.08):
+                return {
+                    "action": "OBSERVE",
+                    "direction": None,
+                    "reason": f"Likuiditas tipis / Payout rendah ({payout:.2f}x < {config.MIN_PAYOUT_MULTIPLIER:.2f}x) - Tahan order"
+                }
+
             return {
                 "action": "ENTER",
                 "direction": "Turun",
-                "payout": market["payout_turun"],
+                "payout": payout,
                 "reason": f"Sniper TURUN! Spot unggul (-${abs(diff_val):,.2f}) | RSI: {rsi_str}"
             }
 
