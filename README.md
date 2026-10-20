@@ -2,8 +2,12 @@
 
 Bot trading otomatis untuk pasar prediksi Binance menggunakan Python.
 
-## Fitur Utama (V3.5 Strict Oracle Finalization Guard & SAPI Sync)
+## Fitur Utama (V3.6 Anti-Double Bet, Time-Sync & Termux Loop Optimization)
 
+- **Loop Sleep & CPU Optimization (Termux Friendly):** Memperbaiki penempatan jeda perulangan (*adaptive sleep*) ke putaran utama bot (1s saat jendela sniper, 2s saat observasi santai). Mencegah loop tanpa jeda, menghemat daya baterai, konsumsi CPU, dan kuota data ponsel Android, serta menghindari limit request Binance API.
+- **Double Betting Prevention & Active Position Recovery:** Mendeteksi posisi yang sedang berjalan di Binance SAPI saat startup atau reconnect. Posisi otomatis dipulihkan ke status aktif sehingga bot tidak akan pernah memasang taruhan ganda pada ronde yang sama.
+- **Server Time Drift Auto-Sync & recvWindow 10000ms:** Menghitung selisih jam ponsel dengan server Binance secara otomatis saat booting dan memperlebar batas toleransi `recvWindow` ke 10.000 ms (10 detik), mencegah kegagalan order akibat error timestamp `-1021`.
+- **Periodic On-Chain History Self-Healing:** Melakukan sinkronisasi riwayat transaksi secara otomatis setiap pergantian ronde 5 menit langsung dari endpoint resmi Binance SAPI, menjamin PnL, Win/Loss, dan saldo selalu 100% konsisten.
 - **Strict Oracle Finalization Guard:** Menjamin posisi tidak akan pernah diselesaikan secara prematur di detik 00-01 saat Chainlink Oracle Binance masih dalam proses finalisasi on-chain (15–35 detik). Posisi tetap berada di antrean `pending_settlement` dengan indikator `⏳ VERIFIKASI SETTLEMENT ON-CHAIN` hingga status resmi berubah menjadi `PENDING_CLAIM`, `CLAIMED`, atau `SETTLED`.
 - **Zero Premature Loss Resolution:** Mencegah bug di mana posisi menang terbaca sebagai *loss* karena pembacaan awal saat nilai `isWinner` / `finalOutcome` masih `null` di SAPI sebelum transaksi on-chain diverifikasi.
 - **Official On-Chain Auto-Redeem (`batch-redeem`):** Memperbaiki parameter resmi Binance SAPI `batch-redeem` menggunakan signed query params sehingga hadiah kemenangan langsung di-klaim (*redeemed*) otomatis di blockchain dan langsung masuk ke saldo wallet USDT aktif.

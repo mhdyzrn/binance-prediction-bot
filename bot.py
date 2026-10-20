@@ -142,7 +142,7 @@ class BinanceAppPredictionBot:
             p_sign = "+" if last["profit"] >= 0 else ""
             pnl_col = "\033[1;92m" if net_pnl >= 0 else "\033[1;91m"
             pnl_sign = "+" if net_pnl >= 0 else ""
-            lines.append(f"  Ronde Terakhir  : [{last['round']}] {last['direction'].upper()} ➔ {h_stat} ({p_sign}{last['profit']:.2f} USDT)")
+            lines.append(f"  Ronde Terakhir  : [{str(last['round'])[-8:]}] {last['direction'].upper()} ➔ {h_stat} ({p_sign}{last['profit']:.2f} USDT)")
             lines.append(f"  Performa Sesi   : \033[1;37m{wins}/{total_trades}\033[0m Menang (\033[1;93m{win_rate:.0f}%\033[0m)")
             lines.append(f"  Net PnL Sesi    : {pnl_col}{pnl_sign}{net_pnl:.2f} USDT\033[0m")
         else:
@@ -252,6 +252,10 @@ class BinanceAppPredictionBot:
                     market = self.engine.update_market_state()
                     expiry_id = market["expiry_str"]
 
+                    # Sinkronkan ronde posisi aktif agar tidak terpicu order ganda
+                    for ap in self.engine.active_positions:
+                        self.placed_expiries.add(ap.get("expiry_str"))
+
                     # Bersihkan notifikasi jika masuk ronde baru
                     if last_expiry_id and last_expiry_id != expiry_id:
                         order_notice = ""
@@ -261,7 +265,7 @@ class BinanceAppPredictionBot:
                     # 2. Evaluasi strategi Late-Sniper
                     signal = self.strategy.evaluate_signal(market)
 
-                    if expiry_id not in self.placed_expiries and signal["action"] == "ENTER":
+                    if expiry_id not in self.placed_expiries and not self.engine.active_positions and signal["action"] == "ENTER":
                         now_ts = time.time()
                         attempts = self.failed_attempts.get(expiry_id, 0)
                         # Batasi maksimal 2 kali percobaan order per ronde dengan jeda minimal 3 detik
@@ -299,9 +303,10 @@ class BinanceAppPredictionBot:
                     order_notice = f"\033[93m⚠ Gangguan: {str(loop_err)[:32]}...\033[0m"
                     time.sleep(1)
 
-                    # Adaptive sleep: 1s saat di jendela sniper (<75s), 2s saat observasi santai (>75s) untuk hemat data/baterai Termux
-                    sleep_time = config.LOOP_INTERVAL_SECONDS if market.get("seconds_left", 300) <= config.SNIPER_TRIGGER_SECONDS else 2
-                    time.sleep(sleep_time)
+                # Adaptive sleep: 1s saat di jendela sniper (<75s), 2s saat observasi santai (>75s) untuk hemat data/baterai Termux
+                secs = market.get("seconds_left", 300) if 'market' in locals() and isinstance(market, dict) else 300
+                sleep_time = config.LOOP_INTERVAL_SECONDS if secs <= config.SNIPER_TRIGGER_SECONDS else 2
+                time.sleep(sleep_time)
 
         except KeyboardInterrupt:
             self.restore_screen()

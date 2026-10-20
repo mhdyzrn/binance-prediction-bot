@@ -34,11 +34,24 @@ class BinanceClient:
         })
         self._cached_wallet: Optional[Dict[str, str]] = None
         self._active_funding_source: str = "WALLET"
+        self.time_offset = 0
+        self._sync_server_time()
+
+    def _sync_server_time(self):
+        """Menghitung selisih waktu lokal dengan server Binance untuk mencegah error timestamp (-1021)"""
+        try:
+            resp = self.session.get(f"{self.base_url}/api/v3/time", timeout=(2.0, 3.0))
+            if resp.status_code == 200:
+                server_time = resp.json().get("serverTime")
+                local_time = int(time.time() * 1000)
+                self.time_offset = local_time - server_time
+        except Exception:
+            pass
 
     def _sign(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Menghasilkan timestamp & signature HMAC-SHA256 resmi Binance"""
-        params["timestamp"] = int(time.time() * 1000)
-        params["recvWindow"] = 5000
+        params["timestamp"] = int(time.time() * 1000) - self.time_offset
+        params["recvWindow"] = 10000
         query_string = urlencode(params)
         signature = hmac.new(
             self.api_secret.encode("utf-8"),
@@ -399,7 +412,8 @@ class BinanceClient:
                 data = resp.json()
                 for topic in data.get("marketTopics", []):
                     title = topic.get("title", "")
-                    if "BTC" in title and "5m" in title:
+                    t_lower = title.lower()
+                    if "btc" in t_lower and "5m" in t_lower:
                         return topic, None
                 return None, "Pasar prediksi BTC 5m sedang tidak aktif di server Binance"
             return None, f"Gagal memuat pasar ({resp.status_code})"
@@ -678,6 +692,76 @@ class PredictionEngine:
             self._strike_is_fallback = False
 
         self.target_strike_price = official_strike if official_strike is not None else self.live_btc_price
+        if self.is_real:
+            self.sync_active_positions()
+
+    def sync_active_positions(self):
+        """
+        Mendeteksi posisi aktif atau pending claim yang sedang berjalan di Binance saat bot dimulai.
+        Mencegah double betting jika bot di-restart di tengah ronde.
+        """
+        if not self.is_real:
+            return
+
+        try:
+            positions = self.client.get_pending_claim_positions()
+            if not positions:
+                return
+
+            now = time.time()
+            existing_pos_ids = {h.get("position_id") for h in self.history if h.get("position_id")}
+            for p in positions:
+                pos_id = p.get("positionId")
+                if pos_id and pos_id in existing_pos_ids:
+                    continue
+
+                topic_title = p.get("marketTopicTitle", "")
+                if topic_title and "BTC" not in topic_title.upper() and "BITCOIN" not in topic_title.upper():
+                    continue
+
+                end_ts = p.get("endDate", 0) / 1000.0
+                status = str(p.get("positionStatus", "")).upper()
+                direction = "Naik" if p.get("outcomeName") == "Up" else "Turun"
+                amount = round(float(p.get("totalCost", 1.0)), 2)
+                potential_win = round(float(p.get("shares", 1.0)), 2)
+                expiry_dt = datetime.fromtimestamp(end_ts)
+                expiry_str = expiry_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+                # Jika ronde masih aktif: masukkan ke active_positions
+                if end_ts > now and status in ["REGISTERED", "ACTIVE"]:
+                    if not any(a.get("order_data", {}).get("positionId") == pos_id for a in self.active_positions):
+                        self.active_positions.append({
+                            "expiry_str": expiry_str,
+                            "expiry_timestamp": int(end_ts),
+                            "direction": direction,
+                            "amount": amount,
+                            "payout_multiplier": (potential_win / amount) if amount > 0 else 1.0,
+                            "potential_win": potential_win,
+                            "strike_price": self.target_strike_price,
+                            "ref_at_entry": self.live_btc_price,
+                            "timestamp": time.time(),
+                            "is_real": True,
+                            "order_data": p
+                        })
+                # Jika ronde sudah expired tapi belum settled: masukkan ke pending_settlement
+                elif end_ts <= now:
+                    if not any(ps.get("order_data", {}).get("positionId") == pos_id for ps in self.pending_settlement):
+                        self.pending_settlement.append({
+                            "expiry_str": expiry_str,
+                            "expiry_timestamp": int(end_ts),
+                            "direction": direction,
+                            "amount": amount,
+                            "payout_multiplier": (potential_win / amount) if amount > 0 else 1.0,
+                            "potential_win": potential_win,
+                            "strike_price": self.target_strike_price,
+                            "ref_at_entry": self.live_btc_price,
+                            "resolution_submitted_at": time.time(),
+                            "timestamp": time.time(),
+                            "is_real": True,
+                            "order_data": p
+                        })
+        except Exception:
+            pass
 
     def _load_history(self) -> List[Dict[str, Any]]:
         """Memuat riwayat transaksi dari disk. Pada mode Real, sinkronkan langsung dengan Binance SAPI"""
@@ -711,12 +795,18 @@ class PredictionEngine:
 
             synced: List[Dict[str, Any]] = []
             for p in positions:
+                topic_title = p.get("marketTopicTitle", "")
+                if topic_title and "BTC" not in topic_title.upper() and "BITCOIN" not in topic_title.upper():
+                    continue
+
                 end_ts = p.get("endDate", 0) / 1000.0
                 round_str = datetime.fromtimestamp(end_ts).strftime("%H:%M:%S")
                 dir_str = "Naik" if p.get("outcomeName") == "Up" else "Turun"
                 won = bool(p.get("isWinner", False))
                 profit = round(float(p.get("realizedPnl", 0.0)), 2)
                 amount = round(float(p.get("totalCost", 0.0)), 2)
+                if profit == 0.0 and not won and amount > 0:
+                    profit = -amount
                 payout = round(amount + profit, 2) if won else 0.0
 
                 synced.append({
@@ -730,7 +820,7 @@ class PredictionEngine:
                     "final_price": p.get("finalOutcome"),
                     "is_real": True,
                     "position_id": p.get("positionId"),
-                    "market_title": p.get("marketTopicTitle")
+                    "market_title": topic_title
                 })
 
             synced.reverse()  # Urutan kronologis (terlama ke terbaru)
@@ -845,6 +935,11 @@ class PredictionEngine:
                 self._resolve_round(self.live_btc_price)
                 if self.cooldown_rounds_left > 0:
                     self.cooldown_rounds_left -= 1
+            if self.is_real:
+                try:
+                    self.sync_real_history(save=True)
+                except Exception:
+                    pass
 
             # Ambil harga strike resmi (Chainlink Oracle resmi di Mode Real, Candlestick Open di Simulasi)
             official_strike = None
@@ -959,6 +1054,10 @@ class PredictionEngine:
 
     def place_order(self, direction: str, amount_usdt: float, payout_multiplier: float) -> Dict[str, Any]:
         """Mengeksekusi taruhan (Real API atau Simulasi)"""
+        # Cegah double order jika sudah ada posisi aktif di ronde ini
+        if self.active_positions:
+            return {"success": False, "msg": "Sudah ada posisi aktif di ronde ini"}
+
         current_bal = self.get_balance()
         
         # Validasi saldo
