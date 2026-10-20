@@ -2,8 +2,9 @@
 
 Bot trading otomatis untuk pasar prediksi Binance menggunakan Python.
 
-## Fitur Utama (V3.9 Real Web3 Order Book Quotes & True Payout Sync)
+## Fitur Utama (V4.0 Clear Payout & Profit Breakdown Dashboard)
 
+- **Transparent Payout & Profit Breakdown:** Memperjelas tampilan target payout pada dashboard aktif dengan memisahkan modal awal dan keuntungan bersih secara eksplisit (contoh: `Target Payout : 1.10 USDT (Modal $1.00 + Untung +$0.10)`), sehingga pengguna memahami dengan pasti berapa saldo yang akan masuk ke dompet jika menang.
 - **Real Web3 Order Book Quotation:** Mengganti estimasi matematis teoritis dengan pembacaan langsung harga buku pesanan (*Web3 Order Book*) dan peluang resmi (`chance` & `price`) dari pasar Binance Web3 Prediction. Angka probabilitas dan multiplier payout di dashboard kini sama persis dengan yang tampil di aplikasi Binance.
 - **Accurate Pre-Order & Post-Order Payout (`get-quote` Sync):** Menyelaraskan nilai `potential_win` (*Target Payout*) secara presisi dari kuotasi on-chain (`amountOut`) Binance SAPI. Menghilangkan 100% selisih antara estimasi (seperti 1.35x) dengan perolehan riil yang didapatkan akun (1.10x).
 - **Drift-Free Precision Countdown (`next_tick` Scheduler):** Menghilangkan 100% masalah loncat detik (seperti dari 12 langsung ke 10). Tampilan hitung mundur kini berdetak presisi tepat 1.000 detik persis sesuai detik jam dinding secara berurutan dan mulus (*12 ➔ 11 ➔ 10 ➔ 09*).

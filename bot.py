@@ -109,8 +109,11 @@ class BinanceAppPredictionBot:
             dir_color = "\033[1;92m" if active_pos["direction"] == "Naik" else "\033[1;91m"
             tag = "REAL" if active_pos.get("is_real") else "SIM"
             pos_amt = active_pos.get("amount", m.get("bet_amount", config.BET_AMOUNT_USDT))
+            payout_val = active_pos.get("potential_win", pos_amt * active_pos.get("payout_multiplier", 1.0))
+            net_profit = round(payout_val - pos_amt, 2)
+            profit_sign = "+" if net_profit >= 0 else ""
             lines.append(f"  Posisi Aktif    : {dir_color}{arrow} {active_pos['direction'].upper()}\033[0m ({pos_amt:.2f} USDT) [{tag}]")
-            lines.append(f"  Target Payout   : \033[1;93m+{active_pos['potential_win']:.2f} USDT\033[0m")
+            lines.append(f"  Target Payout   : \033[1;93m{payout_val:.2f} USDT\033[0m \033[90m(Modal ${pos_amt:.2f} + Untung \033[1;92m{profit_sign}${net_profit:.2f}\033[0m\033[90m)\033[0m")
             lines.append("  Status Bot      : \033[92m✔ Order Sukses! Menunggu expiry...\033[0m")
         else:
             if not is_online:
