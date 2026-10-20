@@ -2,6 +2,7 @@ import time
 import os
 import json
 import math
+import threading
 import hmac
 import hashlib
 import requests
@@ -695,6 +696,59 @@ class PredictionEngine:
         if self.is_real:
             self.sync_active_positions()
 
+        # Worker thread latar belakang untuk update harga & status tanpa memblokir hitung mundur detik
+        self._bg_running = True
+        self._bg_thread = threading.Thread(target=self._bg_worker, daemon=True)
+        self._bg_thread.start()
+
+    def _bg_worker(self):
+        """Worker thread latar belakang untuk menjaga data pasar dan koneksi real-time tanpa latensi UI"""
+        while getattr(self, "_bg_running", True):
+            now = time.time()
+            # 1. Update harga live spot BTC
+            try:
+                p = self.client.get_spot_price(config.TARGET_SYMBOL)
+                self.live_btc_price = p
+                self.last_price_timestamp = now
+                self.is_online = True
+                self.consecutive_errors = 0
+            except Exception:
+                self.consecutive_errors += 1
+                if now - self.last_price_timestamp > 5:
+                    self.is_online = False
+
+            # 2. Update RSI secara berkala (tiap 3 detik)
+            if now - self.last_rsi_update >= 3.0:
+                try:
+                    val_rsi = self.client.calculate_rsi(config.TARGET_SYMBOL, config.RSI_PERIOD)
+                    if val_rsi is not None:
+                        self.cached_rsi = val_rsi
+                    self.last_rsi_update = now
+                except Exception:
+                    pass
+
+            # 3. Periksa status pending settlement jika ada posisi menunggu oracle
+            if self.is_real and self.pending_settlement and (now - self.last_settlement_check >= 3.0):
+                try:
+                    self._check_pending_settlements()
+                    self.last_settlement_check = now
+                except Exception:
+                    pass
+
+            # 4. Periksa pembaruan strike jika sebelumnya fallback
+            if self.is_real and self._strike_is_fallback:
+                try:
+                    real_strike = self.client.get_prediction_strike()
+                    if real_strike is not None:
+                        self.target_strike_price = real_strike
+                        self._strike_is_fallback = False
+                        if self.current_round:
+                            self.current_round["strike_price"] = real_strike
+                except Exception:
+                    pass
+
+            time.sleep(0.5)
+
     def sync_active_positions(self):
         """
         Mendeteksi posisi aktif atau pending claim yang sedang berjalan di Binance saat bot dimulai.
@@ -904,30 +958,10 @@ class PredictionEngine:
         expiry_dt = datetime.fromtimestamp(expiry_timestamp)
         expiry_str = expiry_dt.strftime("%Y-%m-%d %H:%M:%S")
 
-        # Ambil harga real-time BTC Spot dengan failover & connection tracking
-        try:
-            self.live_btc_price = self.client.get_spot_price(config.TARGET_SYMBOL)
-            self.last_price_timestamp = now
-            self.is_online = True
-            self.consecutive_errors = 0
-        except Exception:
-            self.consecutive_errors += 1
-            if now - self.last_price_timestamp > 5:
-                self.is_online = False
-
+        # Status koneksi diukur dari waktu harga terakhir diperbarui oleh worker thread
+        if now - self.last_price_timestamp > 5:
+            self.is_online = False
         stale_seconds = int(now - self.last_price_timestamp)
-
-        # Update RSI secara berkala (tiap 5 detik, atau tiap 2 detik jika sudah masuk zona sniper)
-        if (now - self.last_rsi_update > 5) or (seconds_left <= config.SNIPER_TRIGGER_SECONDS + 5 and now - self.last_rsi_update > 2):
-            val_rsi = self.client.calculate_rsi(config.TARGET_SYMBOL, config.RSI_PERIOD)
-            if val_rsi is not None:
-                self.cached_rsi = val_rsi
-            self.last_rsi_update = now
-
-        # Periksa pending settlement posisi real jika ada (tiap 3 detik)
-        if self.is_real and self.pending_settlement and (now - self.last_settlement_check >= 3.0):
-            self._check_pending_settlements()
-            self.last_settlement_check = now
 
         # Jika masuk ronde 5 menit baru
         if not self.current_round or self.current_round["expiry_timestamp"] != expiry_timestamp:

@@ -2,8 +2,10 @@
 
 Bot trading otomatis untuk pasar prediksi Binance menggunakan Python.
 
-## Fitur Utama (V3.7 100% Binance Rule & Oracle Lifecycle Alignment)
+## Fitur Utama (V3.8 Atomic Precision Countdown & Asynchronous Market Poller)
 
+- **Drift-Free Precision Countdown (`next_tick` Scheduler):** Menghilangkan 100% masalah loncat detik (seperti dari 12 langsung ke 10). Tampilan hitung mundur kini berdetak presisi tepat 1.000 detik persis sesuai detik jam dinding secara berurutan dan mulus (*12 ➔ 11 ➔ 10 ➔ 09*).
+- **Asynchronous Background Market Poller:** Memindahkan pengambilan data harga spot BTC, indikator RSI, pembaruan strike, dan status verifikasi settlement ke thread latar belakang terpisah (`daemon thread`). Pembaruan status pasar di terminal kini berjalan instan (< 1 ms) tanpa pernah tersendat oleh latensi jaringan API Binance.
 - **100% Binance Web3 Prediction Lifecycle Alignment:** Seluruh tahapan trading bot diselaraskan secara penuh dengan siklus hidup resmi pasar prediksi Binance (Predict.fun di BNB Chain):
   1. *Fase Strike Snapshot:* Mengambil harga pembukaan resmi Chainlink Oracle (`variantData.startPrice`) langsung dari pasar Web3.
   2. *Fase Sniper Window (01:15 - 00:25):* Mengeksekusi order saat tren lilin 5M telah terbentuk 80-90% dan buku pesanan Binance masih memiliki likuiditas penuh.

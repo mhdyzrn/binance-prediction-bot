@@ -1,6 +1,7 @@
 import time
 import os
 import sys
+import math
 from datetime import datetime
 import config
 from binance_client import BinanceClient, PredictionEngine
@@ -244,6 +245,7 @@ class BinanceAppPredictionBot:
         self.init_screen()
         order_notice = ""
         last_expiry_id = None
+        next_tick = time.time()
 
         try:
             while True:
@@ -303,10 +305,13 @@ class BinanceAppPredictionBot:
                     order_notice = f"\033[93m⚠ Gangguan: {str(loop_err)[:32]}...\033[0m"
                     time.sleep(1)
 
-                # Adaptive sleep: 1s saat di jendela sniper (<75s), 2s saat observasi santai (>75s) untuk hemat data/baterai Termux
-                secs = market.get("seconds_left", 300) if 'market' in locals() and isinstance(market, dict) else 300
-                sleep_time = config.LOOP_INTERVAL_SECONDS if secs <= config.SNIPER_TRIGGER_SECONDS else 2
-                time.sleep(sleep_time)
+                # Sinkronisasi detik presisi jam dinding (mencegah loncat detik 12 -> 10)
+                next_tick += 1.0
+                sleep_dur = next_tick - time.time()
+                if sleep_dur > 0:
+                    time.sleep(sleep_dur)
+                else:
+                    next_tick = time.time()
 
         except KeyboardInterrupt:
             self.restore_screen()
