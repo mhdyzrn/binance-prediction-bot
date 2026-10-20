@@ -1,6 +1,7 @@
 import time
 import os
 import json
+import math
 import hmac
 import hashlib
 import requests
@@ -504,15 +505,27 @@ class PredictionEngine:
         diff_price = round(self.live_btc_price - self.target_strike_price, 2)
         diff_str = f"+${diff_price:,.2f}" if diff_price >= 0 else f"-${abs(diff_price):,.2f}"
 
-        # Perhitungan peluang dinamis berdasarkan pergerakan BTC
-        # Tiap $10 selisih BTC menggeser probabilitas ~1%
-        base_naik = 0.50 + ((diff_price / 100.0) * 0.15)
-        prob_naik_pct = int(max(10, min(90, round(base_naik * 100))))
-        prob_turun_pct = 100 - prob_naik_pct
+        # Perhitungan peluang dinamis & harga tiket Buku Order (Web3 Order Book) Binance
+        # Menggunakan model volatilitas pasar biner (Black-Scholes Delta aproksimasi)
+        # Faktor waktu memperhitungkan sisa waktu ronde (makin dekat akhir, kepastian makin tinggi)
+        t_ratio = max(10, min(300, seconds_left)) / 300.0
+        time_factor = math.sqrt(t_ratio)
+        sigma = 80.0 * time_factor
+
+        # z-score dengan batas aman numerik
+        z = diff_price / sigma
+        z = max(-15.0, min(15.0, z))
+        p_naik_raw = 1.0 / (1.0 + math.exp(-z))
+
+        # Skala probabilitas menyisakan 1% spread order book Binance (total = 99%)
+        prob_naik_pct = int(round(p_naik_raw * 99))
+        prob_naik_pct = max(1, min(98, prob_naik_pct))
+        prob_turun_pct = 99 - prob_naik_pct
 
         # Multiplier Payout rasio per 1 USDT (seperti di aplikasi Binance)
-        payout_naik_mult = round(1.0 / (prob_naik_pct / 100.0) * 0.98, 2) if prob_naik_pct > 0 else 1.0
-        payout_turun_mult = round(1.0 / (prob_turun_pct / 100.0) * 0.98, 2) if prob_turun_pct > 0 else 1.0
+        # Sesuai Web3 Prediction: Return = 1.0 / (harga_tiket_usdt)
+        payout_naik_mult = round(1.0 / (prob_naik_pct / 100.0), 2) if prob_naik_pct > 0 else 1.0
+        payout_turun_mult = round(1.0 / (prob_turun_pct / 100.0), 2) if prob_turun_pct > 0 else 1.0
 
         current_bal = self.get_balance()
         bet_amount, compound_tier = config.calculate_compound_bet(current_bal)
