@@ -103,7 +103,9 @@ RSI_OVERSOLD = 22.0                                   # Tahan sinyal TURUN jika 
 MAX_CONSECUTIVE_LOSS = 2                              # Jika 2x loss beruntun, jeda 1 ronde untuk hindari market liar
 COOLDOWN_ROUNDS = 1                                   # Jumlah ronde istirahat saat cooldown aktif (1 ronde = 5 menit)
 
-# Penyimpanan Histori Transaksi Permanen
-HISTORY_FILE = "trade_history.json"                   # Lokasi file riwayat transaksi
+# Penyimpanan Histori Transaksi Permanen Terpisah (Real vs Simulasi)
+SIM_HISTORY_FILE = "trade_history.json"                   # Riwayat transaksi simulasi
+REAL_HISTORY_FILE = "real_trade_history.json"             # Riwayat transaksi real live
+HISTORY_FILE = REAL_HISTORY_FILE if not SIMULATION_MODE else SIM_HISTORY_FILE
 LOOP_INTERVAL_SECONDS = 1                             # Refresh rate interval dasar
 

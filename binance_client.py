@@ -549,8 +549,8 @@ class PredictionEngine:
         self.current_round: Optional[Dict[str, Any]] = None
         self.active_positions: List[Dict[str, Any]] = []
         
-        # Riwayat transaksi tersimpan permanen di file
-        self.history_file = config.HISTORY_FILE
+        # Riwayat transaksi tersimpan permanen di file terpisah (Real vs Simulasi)
+        self.history_file = config.REAL_HISTORY_FILE if self.is_real else config.SIM_HISTORY_FILE
         self.history: List[Dict[str, Any]] = self._load_history()
 
         # Saldo simulasi tersimpan permanen agar tidak ter-reset jika tidak habis
@@ -575,13 +575,13 @@ class PredictionEngine:
         self.target_strike_price = official_strike if official_strike is not None else self.live_btc_price
 
     def _load_history(self) -> List[Dict[str, Any]]:
-        """Memuat riwayat transaksi dari disk agar statistik 24 jam tidak hilang saat restart"""
+        """Memuat riwayat transaksi dari disk sesuai mode aktif (Real vs Simulasi)"""
         if os.path.exists(self.history_file):
             try:
                 with open(self.history_file, "r") as f:
                     data = json.load(f)
                     if isinstance(data, list):
-                        return data
+                        return [d for d in data if d.get("is_real", False) == self.is_real]
             except Exception:
                 pass
         return []
@@ -727,11 +727,12 @@ class PredictionEngine:
         secs = seconds_left % 60
         countdown_str = f"{mins:02d}:{secs:02d}"
 
-        # Statistik akumulatif sesi
-        total_trades = len(self.history)
-        wins = sum(1 for h in self.history if h.get("won"))
+        # Statistik akumulatif sesi (difilter ketat sesuai mode aktif: REAL atau SIMULASI)
+        active_hist = [h for h in self.history if h.get("is_real", False) == self.is_real]
+        total_trades = len(active_hist)
+        wins = sum(1 for h in active_hist if h.get("won"))
         win_rate = (wins / total_trades * 100) if total_trades > 0 else 0.0
-        net_pnl = sum(h.get("profit", 0.0) for h in self.history)
+        net_pnl = sum(h.get("profit", 0.0) for h in active_hist)
 
         return {
             "title": f"{config.TARGET_ASSET} Naik atau Turun dalam {config.ROUND_MINUTES} menit",

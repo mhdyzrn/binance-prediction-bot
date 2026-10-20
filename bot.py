@@ -44,7 +44,7 @@ class BinanceAppPredictionBot:
         positions = self.engine.active_positions
         active_pos = positions[-1] if positions else None
 
-        history = self.engine.history
+        history = [h for h in self.engine.history if h.get("is_real", False) == self.engine.is_real]
         total_trades = len(history)
         wins = sum(1 for h in history if h.get("won"))
         win_rate = (wins / total_trades * 100) if total_trades > 0 else 0.0
@@ -131,16 +131,21 @@ class BinanceAppPredictionBot:
         if order_notice:
             lines.append(f"  Notifikasi      : {order_notice}")
 
+        lines.append(" ──────────────────────────────────────────")
         if history:
             last = history[-1]
             h_stat = "\033[1;92mWIN\033[0m" if last["won"] else "\033[1;91mLOSS\033[0m"
             p_sign = "+" if last["profit"] >= 0 else ""
             pnl_col = "\033[1;92m" if net_pnl >= 0 else "\033[1;91m"
             pnl_sign = "+" if net_pnl >= 0 else ""
-            lines.append(" ──────────────────────────────────────────")
             lines.append(f"  Ronde Terakhir  : [{last['round']}] {last['direction'].upper()} ➔ {h_stat} ({p_sign}{last['profit']:.2f} USDT)")
             lines.append(f"  Performa Sesi   : \033[1;37m{wins}/{total_trades}\033[0m Menang (\033[1;93m{win_rate:.0f}%\033[0m)")
             lines.append(f"  Net PnL Sesi    : {pnl_col}{pnl_sign}{net_pnl:.2f} USDT\033[0m")
+        else:
+            mode_label = "Real" if self.engine.is_real else "Simulasi"
+            lines.append(f"  Ronde Terakhir  : [Menunggu transaksi {mode_label.lower()} pertama]")
+            lines.append(f"  Performa Sesi   : \033[1;37m0/0\033[0m Menang (0%)")
+            lines.append(f"  Net PnL Sesi    : \033[1;92m+0.00 USDT\033[0m")
 
 
         lines.append(" ──────────────────────────────────────────")
@@ -300,19 +305,22 @@ class BinanceAppPredictionBot:
             print("=" * 50)
             try:
                 bal = self.engine.get_balance()
-                history = self.engine.history
+                history = [h for h in self.engine.history if h.get("is_real", False) == self.engine.is_real]
                 total = len(history)
                 wins = sum(1 for h in history if h.get("won"))
                 losses = total - wins
                 winrate = (wins / total * 100) if total > 0 else 0.0
                 net_pnl = sum(h.get("profit", 0.0) for h in history)
                 pnl_sign = "+" if net_pnl >= 0 else ""
+                hist_file = config.REAL_HISTORY_FILE if self.engine.is_real else config.SIM_HISTORY_FILE
+                mode_str = "REAL TRADING" if self.engine.is_real else "SIMULASI"
+                print(f"Mode Trading      : {mode_str}")
                 print(f"Saldo Akhir       : {bal:.2f} USDT")
                 print(f"Total Transaksi   : {total} Ronde")
                 print(f"Menang / Kalah    : {wins} Win / {losses} Loss")
                 print(f"Win Rate Sesi     : {winrate:.1f}%")
                 print(f"Net Profit/Loss   : {pnl_sign}{net_pnl:.2f} USDT")
-                print(f"File Log Tersimpan: {config.HISTORY_FILE}")
+                print(f"File Log Tersimpan: {hist_file}")
             except (Exception, KeyboardInterrupt):
                 pass
             print("=" * 50 + "\n")

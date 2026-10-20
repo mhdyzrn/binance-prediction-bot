@@ -2,8 +2,9 @@
 
 Bot trading otomatis untuk pasar prediksi Binance menggunakan Python.
 
-## Fitur Utama (V2.8 Account Context & SAS Guard Edition)
+## Fitur Utama (V2.9 Isolated Real vs Sim History Edition)
 
+- **Isolated Real & Simulation Histories:** Pemisahan total berkas riwayat transaksi dan statistik performa sesi (`real_trade_history.json` untuk trading riil dan `trade_history.json` untuk simulasi). Net PnL dan Win Rate pada mode Real murni menampilkan performa riil tanpa tercampur hasil simulasi.
 - **Official Bundle Specification Compliance:** Mengirimkan parameter wajib `accountType: "SPOT"` dan validasi `timeInForce: "FOK"` sesuai spesifikasi resmi Binance SAPI `place-order-bundle`.
 - **SAS (Secure Auto-Signing) Detector:** Mendeteksi status aktivasi Secure Auto-Signing (SAS) akun Binance Web3 secara otomatis saat bot mulai berjalan dan memandu pengguna.
 - **Order Book Liquidity Guard:** Mencegah taruhan pada probabilitas ekstrem (>92% / Payout < 1.08x) di mana buku pesanan Predict.fun/Binance kehabisan penjual, sehingga tidak terkena error *lack of liquidity*.
