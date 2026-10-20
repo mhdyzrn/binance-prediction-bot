@@ -442,23 +442,26 @@ class BinanceClient:
         if not token_id:
             return {"success": False, "msg": f"Token ID untuk arah {direction} tidak ditemukan di pasar"}
 
-        # Tentukan sumber dana (WALLET atau CEX)
-        funding_source = getattr(self, "_active_funding_source", "WALLET")
+        # Tentukan sumber dana (MPC atau CEX)
+        # Sesuai dokumentasi resmi Binance SAPI place-order-bundle:
+        # fundingSource wajib bernilai 'MPC' (Web3 Wallet) atau 'CEX' (Spot)
         cfg_source = getattr(config, "FUNDING_SOURCE", "AUTO").upper()
-        if cfg_source in ["WALLET", "CEX"]:
-            funding_source = cfg_source
+        if cfg_source in ["MPC", "WALLET"]:
+            funding_source = "MPC"
+        elif cfg_source == "CEX":
+            funding_source = "CEX"
         else:
-            # Mode AUTO: utamakan Prediction Wallet jika saldo mencukupi
+            # Mode AUTO: utamakan Web3 Prediction Wallet (MPC) jika saldo mencukupi
             pred_bal, _, _ = self.get_prediction_balance_details()
             if pred_bal >= amount_usdt:
-                funding_source = "WALLET"
+                funding_source = "MPC"
             else:
                 spot_bal = self.get_spot_usdt_balance()
                 if spot_bal >= amount_usdt:
                     funding_source = "CEX"
                 else:
-                    funding_source = "WALLET"
-        self._active_funding_source = funding_source
+                    funding_source = "MPC"
+        self._active_funding_source = "WALLET" if funding_source == "MPC" else "CEX"
 
         # 3. Dapatkan Quote
         quote_url = f"{self.base_url}/sapi/v1/w3w/wallet/prediction/trade/get-quote"
