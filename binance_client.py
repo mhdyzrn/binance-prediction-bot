@@ -593,6 +593,9 @@ class BinanceClient:
             if not quote_id:
                 return {"success": False, "msg": "Quote ID tidak diperoleh dari Binance"}
 
+            actual_shares = float(q_data.get("amountOut", 0)) / 1e18
+            average_price = float(q_data.get("averagePrice", 0))
+
             # 4. Pasang Order Bundle
             order_url = f"{self.base_url}/sapi/v1/w3w/wallet/prediction/trade/place-order-bundle"
             o_params = {
@@ -610,7 +613,13 @@ class BinanceClient:
             o_data = o_resp.json()
             if o_resp.status_code == 200:
                 order_id = o_data.get("orderId", o_data.get("id", "OK"))
-                return {"success": True, "data": o_data, "msg": f"Order Real {direction} berhasil dipasang (ID: {order_id})"}
+                return {
+                    "success": True,
+                    "data": o_data,
+                    "actual_payout": round(actual_shares, 2) if actual_shares > 0 else None,
+                    "average_price": average_price,
+                    "msg": f"Order Real {direction} berhasil dipasang (ID: {order_id})"
+                }
             else:
                 code = o_data.get("code")
                 msg = o_data.get("msg", str(o_data))
@@ -735,15 +744,33 @@ class PredictionEngine:
                 except Exception:
                     pass
 
-            # 4. Periksa pembaruan strike jika sebelumnya fallback
-            if self.is_real and self._strike_is_fallback:
+            # 4. Sinkronkan harga Strike & kuotasi Buku Order Web3 resmi Binance
+            if (now - getattr(self, "_last_market_poll", 0)) >= 2.0:
                 try:
-                    real_strike = self.client.get_prediction_strike()
-                    if real_strike is not None:
-                        self.target_strike_price = real_strike
-                        self._strike_is_fallback = False
-                        if self.current_round:
-                            self.current_round["strike_price"] = real_strike
+                    topic, _ = self.client.get_active_btc_prediction_market()
+                    if topic:
+                        # Update strike resmi jika sebelumnya fallback
+                        if self._strike_is_fallback and topic.get("variantData"):
+                            real_strike = topic["variantData"].get("startPrice")
+                            if real_strike:
+                                self.target_strike_price = float(real_strike)
+                                self._strike_is_fallback = False
+                                if self.current_round:
+                                    self.current_round["strike_price"] = self.target_strike_price
+
+                        # Ambil harga tiket & probabilitas order book resmi Binance Web3
+                        if topic.get("markets"):
+                            for out in topic["markets"][0].get("outcomes", []):
+                                name = out.get("name")
+                                p_val = float(out.get("price", 0))
+                                ch_val = float(out.get("chance", p_val))
+                                if name == "Up" and p_val > 0:
+                                    self.real_up_price = p_val
+                                    self.real_up_chance = ch_val
+                                elif name == "Down" and p_val > 0:
+                                    self.real_down_price = p_val
+                                    self.real_down_chance = ch_val
+                    self._last_market_poll = now
                 except Exception:
                     pass
 
@@ -1012,24 +1039,30 @@ class PredictionEngine:
         diff_price = round(self.live_btc_price - self.target_strike_price, 2)
         diff_str = f"+${diff_price:,.2f}" if diff_price >= 0 else f"-${abs(diff_price):,.2f}"
 
-        # Perhitungan peluang dinamis & harga tiket Buku Order (Web3 Order Book) Binance
-        t_ratio = max(10, min(300, seconds_left)) / 300.0
-        time_factor = math.sqrt(t_ratio)
-        sigma = 80.0 * time_factor
-
-        # z-score dengan batas aman numerik
-        z = diff_price / sigma
-        z = max(-15.0, min(15.0, z))
-        p_naik_raw = 1.0 / (1.0 + math.exp(-z))
-
-        # Skala probabilitas menyisakan 1% spread order book Binance (total = 99%)
-        prob_naik_pct = int(round(p_naik_raw * 99))
-        prob_naik_pct = max(1, min(98, prob_naik_pct))
-        prob_turun_pct = 99 - prob_naik_pct
-
-        # Multiplier Payout rasio per 1 USDT (seperti di aplikasi Binance)
-        payout_naik_mult = round(1.0 / (prob_naik_pct / 100.0), 2) if prob_naik_pct > 0 else 1.0
-        payout_turun_mult = round(1.0 / (prob_turun_pct / 100.0), 2) if prob_turun_pct > 0 else 1.0
+        # Probabilitas & Payout rasio diambil langsung dari Buku Order Resmi Binance Web3 jika tersedia
+        real_up = getattr(self, "real_up_price", None)
+        real_down = getattr(self, "real_down_price", None)
+        if self.is_real and real_up and real_down and real_up > 0 and real_down > 0:
+            up_chance = getattr(self, "real_up_chance", real_up)
+            down_chance = getattr(self, "real_down_chance", real_down)
+            prob_naik_pct = int(round(up_chance * 100))
+            prob_turun_pct = 100 - prob_naik_pct
+            # Payout rasio per 1 USDT setelah memperhitungkan fee AMM Binance (2%)
+            payout_naik_mult = round((1.0 / real_up) * 0.98, 2)
+            payout_turun_mult = round((1.0 / real_down) * 0.98, 2)
+        else:
+            # Fallback ke formula volatilitas delta jika data order book Web3 belum termuat / Mode Simulasi
+            t_ratio = max(10, min(300, seconds_left)) / 300.0
+            time_factor = math.sqrt(t_ratio)
+            sigma = 80.0 * time_factor
+            z = diff_price / sigma
+            z = max(-15.0, min(15.0, z))
+            p_naik_raw = 1.0 / (1.0 + math.exp(-z))
+            prob_naik_pct = int(round(p_naik_raw * 99))
+            prob_naik_pct = max(1, min(98, prob_naik_pct))
+            prob_turun_pct = 99 - prob_naik_pct
+            payout_naik_mult = round(1.0 / (prob_naik_pct / 100.0), 2) if prob_naik_pct > 0 else 1.0
+            payout_turun_mult = round(1.0 / (prob_turun_pct / 100.0), 2) if prob_turun_pct > 0 else 1.0
 
         current_bal = self.get_balance()
         bet_amount, compound_tier = config.calculate_compound_bet(current_bal)
@@ -1101,11 +1134,17 @@ class PredictionEngine:
 
         # Jika mode REAL TRADING, kirim order ke Binance SAPI
         order_data = None
+        potential_win = round(amount_usdt * payout_multiplier, 2)
         if self.is_real:
             res = self.client.place_real_prediction_order(direction, amount_usdt)
             if not res.get("success"):
                 return res
             order_data = res.get("data")
+            # Ambil nilai payout riil resmi dari get-quote Binance SAPI
+            actual_payout = res.get("actual_payout")
+            if actual_payout and actual_payout > 0:
+                potential_win = round(actual_payout, 2)
+                payout_multiplier = round(actual_payout / amount_usdt, 2)
 
         # Catat posisi aktif
         if not self.is_real:
@@ -1120,7 +1159,7 @@ class PredictionEngine:
             "direction": direction,
             "amount": amount_usdt,
             "payout_multiplier": payout_multiplier,
-            "potential_win": round(amount_usdt * payout_multiplier, 2),
+            "potential_win": potential_win,
             "strike_price": self.target_strike_price,
             "ref_at_entry": self.live_btc_price,
             "timestamp": time.time(),
