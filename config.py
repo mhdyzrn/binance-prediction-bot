@@ -34,6 +34,12 @@ BINANCE_VISION_URL = "https://data-api.binance.vision"
 # Proxy Statis (Opsional: berguna untuk IP Whitelist Binance tetap & anti-blokir di Termux)
 BINANCE_PROXY = os.getenv("BINANCE_PROXY", "")
 
+# Sumber Dana Taruhan Real (Pilihan: AUTO, WALLET, CEX)
+# WALLET = Binance Web3 Prediction Wallet
+# CEX    = Binance Spot Wallet
+# AUTO   = Otomatis gunakan wallet yang memiliki saldo USDT
+FUNDING_SOURCE = os.getenv("FUNDING_SOURCE", "AUTO").upper()
+
 # Target Pasar: BTC (Bitcoin) 5 Menit
 TARGET_ASSET = "BTC"                                # Nama tampilan
 TARGET_SYMBOL = "BTCUSDT"                           # Pasangan pasar spot

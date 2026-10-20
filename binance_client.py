@@ -33,6 +33,7 @@ class BinanceClient:
             "Content-Type": "application/x-www-form-urlencoded"
         })
         self._cached_wallet: Optional[Dict[str, str]] = None
+        self._active_funding_source: str = "WALLET"
 
     def _sign(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Menghasilkan timestamp & signature HMAC-SHA256 resmi Binance"""
@@ -134,64 +135,6 @@ class BinanceClient:
         except Exception:
             return None
 
-    def test_account_connection(self) -> tuple[bool, str, float]:
-        """
-        Menguji koneksi ke Binance API dan mengambil saldo USDT riil.
-        Mengembalikan (status_sukses, pesan, saldo_usdt).
-        """
-        if not self.api_key or not self.api_secret:
-            return False, "API Key / Secret belum diisi di file .env", 0.0
-
-        url = f"{self.base_url}/api/v3/account"
-        params = self._sign({})
-        headers = {"X-MBX-APIKEY": self.api_key}
-
-        try:
-            resp = self.session.get(url, headers=headers, params=params, timeout=(3.0, 5.0))
-            if resp.status_code == 200:
-                data = resp.json()
-                for b in data.get("balances", []):
-                    if b.get("asset") == "USDT":
-                        return True, "Koneksi berhasil", float(b.get("free", 0.0))
-                return True, "Koneksi berhasil (USDT 0.00)", 0.0
-            else:
-                try:
-                    err = resp.json().get("msg", resp.text)
-                except Exception:
-                    err = resp.text
-                return False, f"Respon Binance ({resp.status_code}): {err}", 0.0
-        except requests.exceptions.ConnectTimeout:
-            return False, "Timeout koneksi ke api.binance.com (Diblokir ISP). Aktifkan VPN (misal 1.1.1.1 WARP).", 0.0
-        except requests.exceptions.ConnectionError:
-            return False, "Gagal koneksi ke api.binance.com (Koneksi ditolak/diblokir ISP). Aktifkan VPN.", 0.0
-        except Exception as e:
-            return False, f"Error: {e}", 0.0
-
-    def get_real_usdt_balance(self) -> Optional[float]:
-        """
-        Mengambil saldo USDT riil dari akun Binance
-        Menggunakan endpoint resmi GET /api/v3/account
-        Mengembalikan None jika jaringan terputus agar tidak menimpa saldo sebelumnya
-        """
-        if not self.api_key or not self.api_secret:
-            return 0.0
-
-        url = f"{self.base_url}/api/v3/account"
-        params = self._sign({})
-        headers = {"X-MBX-APIKEY": self.api_key}
-
-        try:
-            resp = self.session.get(url, headers=headers, params=params, timeout=(3.0, 5.0))
-            if resp.status_code == 200:
-                data = resp.json()
-                for b in data.get("balances", []):
-                    if b.get("asset") == "USDT":
-                        return float(b.get("free", 0.0))
-                return 0.0
-            return None
-        except Exception:
-            return None
-
     def get_prediction_wallet(self) -> tuple[Optional[Dict[str, str]], Optional[str]]:
         """Mengambil info wallet address & id untuk Web3 Prediction. Mengembalikan (wallet, err_msg)"""
         if self._cached_wallet:
@@ -218,6 +161,192 @@ class BinanceClient:
             return None, "Koneksi terputus saat mengecek wallet Binance (Periksa internet/VPN)."
         except Exception as e:
             return None, f"Gagal mengecek wallet: {e}"
+
+    def get_prediction_balance_details(self) -> tuple[float, float, List[str]]:
+        """
+        Mengambil detail saldo Web3 Prediction:
+        Mengembalikan (wallet_balance, claimable_balance, claimable_token_ids)
+        """
+        wallet, _ = self.get_prediction_wallet()
+        if not wallet or not wallet.get("walletAddress"):
+            return 0.0, 0.0, []
+
+        url = f"{self.base_url}/sapi/v1/w3w/wallet/prediction/position/list"
+        params = self._sign({"walletAddress": wallet["walletAddress"]})
+        headers = {"X-MBX-APIKEY": self.api_key}
+        try:
+            resp = self.session.get(url, headers=headers, params=params, timeout=(3.0, 5.0))
+            if resp.status_code == 200:
+                data = resp.json()
+                summary = data.get("summary", {})
+                bal = float(summary.get("walletBalance", 0.0))
+                claimable = float(summary.get("totalClaimableAmount", 0.0))
+
+                claimable_tokens = []
+                for p in data.get("positions", []):
+                    if p.get("canClaim") and p.get("tokenId"):
+                        claimable_tokens.append(p["tokenId"])
+
+                return bal, claimable, claimable_tokens
+        except Exception:
+            pass
+        return 0.0, 0.0, []
+
+    def claim_prediction_winnings(self, token_ids: Optional[List[str]] = None) -> tuple[bool, str]:
+        """
+        Klaim / redeem hasil kemenangan prediksi Web3 secara otomatis ke saldo wallet.
+        Menggunakan endpoint resmi POST /sapi/v1/w3w/wallet/prediction/batch-redeem.
+        """
+        wallet, err = self.get_prediction_wallet()
+        if not wallet or not wallet.get("walletAddress") or not wallet.get("walletId"):
+            return False, err or "Prediction wallet tidak ditemukan"
+
+        if not token_ids:
+            _, _, token_ids = self.get_prediction_balance_details()
+
+        if not token_ids:
+            return False, "Tidak ada kemenangan tertunda yang perlu di-klaim"
+
+        url = f"{self.base_url}/sapi/v1/w3w/wallet/prediction/batch-redeem"
+        params = self._sign({})
+        headers = {
+            "X-MBX-APIKEY": self.api_key,
+            "Content-Type": "application/json"
+        }
+        body = {
+            "walletAddress": wallet["walletAddress"],
+            "walletId": wallet["walletId"],
+            "tokenIds": token_ids,
+            "chainId": "56"
+        }
+        try:
+            resp = self.session.post(url, headers=headers, params=params, json=body, timeout=(4.0, 8.0))
+            if resp.status_code == 200:
+                return True, f"Berhasil klaim {len(token_ids)} hadiah kemenangan"
+            data = resp.json()
+            return False, data.get("msg", resp.text)
+        except Exception as e:
+            return False, f"Gagal klaim hadiah: {e}"
+
+    def get_spot_usdt_balance(self) -> float:
+        """Mengambil saldo USDT free di Spot Wallet Binance"""
+        if not self.api_key or not self.api_secret:
+            return 0.0
+        url = f"{self.base_url}/api/v3/account"
+        params = self._sign({})
+        headers = {"X-MBX-APIKEY": self.api_key}
+        try:
+            resp = self.session.get(url, headers=headers, params=params, timeout=(3.0, 5.0))
+            if resp.status_code == 200:
+                for b in resp.json().get("balances", []):
+                    if b.get("asset") == "USDT":
+                        return float(b.get("free", 0.0))
+        except Exception:
+            pass
+        return 0.0
+
+    def get_real_usdt_balance(self) -> Optional[float]:
+        """
+        Mengambil saldo USDT riil akun Binance:
+        Mendukung pengecekan saldo Web3 Prediction Wallet dan Spot Wallet.
+        Mengembalikan None jika jaringan terputus total agar tidak menimpa saldo sebelumnya.
+        """
+        if not self.api_key or not self.api_secret:
+            return 0.0
+
+        try:
+            pred_bal, claimable, claimable_tokens = self.get_prediction_balance_details()
+            # Coba auto-claim hadiah jika ada
+            if claimable_tokens:
+                self.claim_prediction_winnings(claimable_tokens)
+                pred_bal, _, _ = self.get_prediction_balance_details()
+
+            spot_bal = self.get_spot_usdt_balance()
+
+            cfg_source = getattr(config, "FUNDING_SOURCE", "AUTO").upper()
+            if cfg_source == "WALLET":
+                self._active_funding_source = "WALLET"
+                return pred_bal
+            elif cfg_source == "CEX":
+                self._active_funding_source = "CEX"
+                return spot_bal
+            else:  # AUTO
+                if pred_bal > 0:
+                    self._active_funding_source = "WALLET"
+                    return pred_bal
+                elif spot_bal > 0:
+                    self._active_funding_source = "CEX"
+                    return spot_bal
+                else:
+                    self._active_funding_source = "WALLET"
+                    return 0.0
+        except Exception:
+            return None
+
+    def test_account_connection(self) -> tuple[bool, str, float]:
+        """
+        Menguji koneksi ke Binance API dan mendeteksi saldo USDT riil:
+        Mengecek Web3 Prediction Wallet dan Spot Wallet secara komprehensif.
+        Mengembalikan (status_sukses, pesan, saldo_usdt_aktif).
+        """
+        if not self.api_key or not self.api_secret:
+            return False, "API Key / Secret belum diisi di file .env", 0.0
+
+        # 1. Cek Web3 Prediction Wallet
+        pred_wallet, w_err = self.get_prediction_wallet()
+        pred_bal = 0.0
+        claimable = 0.0
+        pred_connected = False
+        if pred_wallet and pred_wallet.get("walletAddress"):
+            pred_connected = True
+            pred_bal, claimable, _ = self.get_prediction_balance_details()
+
+        # 2. Cek Spot Account
+        spot_bal = 0.0
+        spot_connected = False
+        spot_err = None
+        try:
+            url = f"{self.base_url}/api/v3/account"
+            params = self._sign({})
+            headers = {"X-MBX-APIKEY": self.api_key}
+            resp = self.session.get(url, headers=headers, params=params, timeout=(3.0, 5.0))
+            if resp.status_code == 200:
+                spot_connected = True
+                for b in resp.json().get("balances", []):
+                    if b.get("asset") == "USDT":
+                        spot_bal = float(b.get("free", 0.0))
+                        break
+            else:
+                spot_err = resp.json().get("msg", resp.text) if resp.headers.get("content-type") == "application/json" else resp.text[:60]
+        except Exception as e:
+            spot_err = str(e)
+
+        # Evaluasi hasil koneksi
+        if not pred_connected and not spot_connected:
+            err_msg = w_err or spot_err or "Gagal terhubung ke server Binance"
+            return False, f"Respon Binance: {err_msg}", 0.0
+
+        # Tentukan active balance & active funding source
+        cfg_source = getattr(config, "FUNDING_SOURCE", "AUTO").upper()
+        if cfg_source == "WALLET":
+            self._active_funding_source = "WALLET"
+            active_bal = pred_bal
+        elif cfg_source == "CEX":
+            self._active_funding_source = "CEX"
+            active_bal = spot_bal
+        else:  # AUTO
+            if pred_bal > 0:
+                self._active_funding_source = "WALLET"
+                active_bal = pred_bal
+            elif spot_bal > 0:
+                self._active_funding_source = "CEX"
+                active_bal = spot_bal
+            else:
+                self._active_funding_source = "WALLET"
+                active_bal = 0.0
+
+        msg = f"Koneksi berhasil! (Prediction: {pred_bal:.2f} USDT, Spot: {spot_bal:.2f} USDT)"
+        return True, msg, active_bal
 
     def get_active_btc_prediction_market(self) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
         """Mengambil data pasar BTC 5m resmi dari Binance Web3 Prediction. Mengembalikan (market, err_msg)"""
@@ -283,6 +412,24 @@ class BinanceClient:
         if not token_id:
             return {"success": False, "msg": f"Token ID untuk arah {direction} tidak ditemukan di pasar"}
 
+        # Tentukan sumber dana (WALLET atau CEX)
+        funding_source = getattr(self, "_active_funding_source", "WALLET")
+        cfg_source = getattr(config, "FUNDING_SOURCE", "AUTO").upper()
+        if cfg_source in ["WALLET", "CEX"]:
+            funding_source = cfg_source
+        else:
+            # Mode AUTO: utamakan Prediction Wallet jika saldo mencukupi
+            pred_bal, _, _ = self.get_prediction_balance_details()
+            if pred_bal >= amount_usdt:
+                funding_source = "WALLET"
+            else:
+                spot_bal = self.get_spot_usdt_balance()
+                if spot_bal >= amount_usdt:
+                    funding_source = "CEX"
+                else:
+                    funding_source = "WALLET"
+        self._active_funding_source = funding_source
+
         # 3. Dapatkan Quote
         quote_url = f"{self.base_url}/sapi/v1/w3w/wallet/prediction/trade/get-quote"
         amount_wei = str(int(amount_usdt * 1e18))
@@ -293,7 +440,7 @@ class BinanceClient:
             "amountIn": amount_wei,
             "orderType": "MARKET",
             "slippageBps": 1200,
-            "fundingSource": "CEX"
+            "fundingSource": funding_source
         }
         q_params = self._sign(q_params)
         headers = {"X-MBX-APIKEY": self.api_key}
@@ -321,7 +468,7 @@ class BinanceClient:
                 "orderType": "MARKET",
                 "timeInForce": "FOK",
                 "slippageBps": 1200,
-                "fundingSource": "CEX"
+                "fundingSource": funding_source
             }
             o_params = self._sign(o_params)
             o_resp = self.session.post(order_url, headers=headers, params=o_params, timeout=(3.0, 5.0))
@@ -561,6 +708,7 @@ class PredictionEngine:
             "win_naik_usdt": win_naik_usdt,
             "win_turun_usdt": win_turun_usdt,
             "balance_usdt": current_bal,
+            "funding_source": getattr(self.client, "_active_funding_source", "WALLET"),
             "bet_amount": bet_amount,
             "compound_tier": compound_tier,
 
@@ -647,4 +795,12 @@ class PredictionEngine:
 
         self.active_positions = remaining
         self._save_history()
+
+        # Untuk mode real, otomatis claim kemenangan tertunda dan refresh saldo
+        if self.is_real:
+            try:
+                self.client.claim_prediction_winnings()
+                self.get_balance(force_refresh=True)
+            except Exception:
+                pass
 

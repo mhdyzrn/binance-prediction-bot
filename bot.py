@@ -91,7 +91,7 @@ class BinanceAppPredictionBot:
             f"  │{p_naik_str:^18}│  │{p_turun_str:^18}│",
             "  └──────────────────┘  └──────────────────┘",
             " ──────────────────────────────────────────",
-            f"  Saldo Akun      : \033[1;32m{m['balance_usdt']:.2f} USDT\033[0m",
+            f"  Saldo Akun      : \033[1;32m{m['balance_usdt']:.2f} USDT\033[0m" + (f" \033[90m({m.get('funding_source', 'Wallet')})\033[0m" if self.engine.is_real else ""),
             f"  Auto-Compound   : \033[1;96m{m.get('compound_tier', 'Tier 1')}\033[0m ➔ Bet: \033[1;33m{m.get('bet_amount', config.BET_AMOUNT_USDT):.2f} USDT\033[0m" if config.ENABLE_AUTO_COMPOUND else f"  Ukuran Taruhan  : \033[1;33m{m.get('bet_amount', config.BET_AMOUNT_USDT):.2f} USDT\033[0m (Fixed)",
         ]
 
@@ -191,7 +191,9 @@ class BinanceAppPredictionBot:
                 if success:
                     self.engine.cached_real_balance = real_bal
                     self.engine.last_balance_check = time.time()
-                    print(f"✔ Akun Binance Terhubung! Saldo USDT Tersedia: {real_bal:.2f} USDT")
+                    source_str = getattr(self.client, "_active_funding_source", "WALLET")
+                    print(f"✔ Akun Binance Terhubung! {msg}")
+                    print(f"  • Saldo Aktif : \033[1;32m{real_bal:.2f} USDT\033[0m (Sumber: {source_str})")
                     time.sleep(1.5)
                 else:
                     print(f"\n\033[91m✘ Gagal terhubung ke Akun Binance:\033[0m {msg}")

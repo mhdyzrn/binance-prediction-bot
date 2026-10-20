@@ -2,8 +2,11 @@
 
 Bot trading otomatis untuk pasar prediksi Binance menggunakan Python.
 
-## Fitur Utama (V2.5 Max Bet $2 Edition)
+## Fitur Utama (V2.6 Dual-Wallet & Real Balance Edition)
 
+- **Dual-Wallet Balance Detection:** Mendeteksi saldo riil secara otomatis baik dari **Binance Web3 Prediction Wallet** (`walletBalance`) maupun **Spot Wallet** (CEX USDT free).
+- **Auto Funding Source Routing:** Otomatis menyesuaikan sumber pembayaran tiket taruhan (`WALLET` atau `CEX`) sesuai ketersediaan saldo di akun.
+- **Auto-Claim Winnings (Batch-Redeem):** Otomatis mengklaim hasil hadiah ronde yang menang langsung ke saldo Prediction Wallet Anda.
 - **Dynamic Volatility Delta & Order Book Pricing:** Menghitung probabilitas dan payout Naik/Turun secara dinamis menggunakan model volatilitas pasar biner dan sisa waktu ronde. Angka persentase dan estimasi payout sinkron dan realistis mengikuti pergerakan buku order (*Web3 Order Book*) aplikasi Binance asli.
 - **Auto-Compounding & Step-Down Rule (Max $2):** Ukuran taruhan membesar otomatis secara bertingkat seiring bertambahnya saldo ($10+ ➔ $1, $50+ ➔ Max $2 USDT), dan otomatis turun (*step-down*) jika saldo mengalami penurunan demi melindungi modal dari drawdown.
 - **Presisi Strike 5M Open:** Mengambil harga pembukaan (*open price*) candlestick 5M resmi Binance Vision agar strike price 100% akurat meski bot dinyalakan di tengah ronde.
