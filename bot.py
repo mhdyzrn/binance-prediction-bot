@@ -80,6 +80,7 @@ class BinanceAppPredictionBot:
             " \033[1;36m══════════════════════════════════════════\033[0m",
             f"  \033[1;37mBINANCE PREDICTION\033[0m   {mode_badge}",
             " \033[1;36m══════════════════════════════════════════\033[0m",
+            f"  Nama Pasar      : \033[1;93m{m.get('market_name', f'{config.TARGET_ASSET} Naik atau Turun dalam {config.ROUND_MINUTES} Menit?')}\033[0m",
             f"  Status Jaringan : {conn_badge}",
             f"  Kedaluwarsa     : \033[1m{m['expiry_str']}\033[0m",
             f"  Strike (5M Open): \033[1;37m${m['strike_price']:,.2f}\033[0m",
@@ -164,6 +165,7 @@ class BinanceAppPredictionBot:
         print("=" * 55)
         print("   BINANCE PREDICTION BOT - BTC 5 MENIT (REAL & SIM)  ")
         print("=" * 55)
+        print(f"Pasar Aktif   : \033[1;93m{config.TARGET_ASSET} Naik atau Turun dalam {config.ROUND_MINUTES} Menit?\033[0m")
         
         # Test koneksi data pasar dengan retry otomatis (hingga 3 kali)
         btc_price = None
@@ -317,6 +319,7 @@ class BinanceAppPredictionBot:
                 pnl_sign = "+" if net_pnl >= 0 else ""
                 hist_file = config.REAL_HISTORY_FILE if self.engine.is_real else config.SIM_HISTORY_FILE
                 mode_str = "REAL TRADING" if self.engine.is_real else "SIMULASI"
+                print(f"Pasar             : {config.TARGET_ASSET} Naik atau Turun dalam {config.ROUND_MINUTES} Menit?")
                 print(f"Mode Trading      : {mode_str}")
                 print(f"Saldo Akhir       : {bal:.2f} USDT")
                 print(f"Total Transaksi   : {total} Ronde")

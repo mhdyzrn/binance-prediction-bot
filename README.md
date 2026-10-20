@@ -2,8 +2,9 @@
 
 Bot trading otomatis untuk pasar prediksi Binance menggunakan Python.
 
-## Fitur Utama (V3.1 Official Chainlink Settlement & SAPI History Engine)
+## Fitur Utama (V3.2 Dynamic Market Identity Edition)
 
+- **Dynamic Market Name & Identity:** Menampilkan nama pasar prediksi dinamis pada dashboard utama, terminal startup, dan laporan sesi (contoh: *BTC Naik atau Turun dalam 5 Menit?*) yang menyesuaikan secara otomatis dengan aset dan durasi ronde aktif.
 - **Official On-Chain Settlement Sync:** Pada mode Real, hasil Menang/Kalah (Win/Loss) diverifikasi langsung dari endpoint resmi Binance Web3 Prediction SAPI `GET /sapi/v1/w3w/wallet/prediction/position/settled-history`. Menghilangkan 100% selisih kalkulasi antara estimasi harga spot lokal dan hasil resolusi on-chain Chainlink Oracle Binance.
 - **Chainlink Oracle Strike Price Integration:** Mengambil harga Strike resmi ronde (`variantData.startPrice`) langsung dari pasar Binance Web3 Prediction (`market/list`), bukan lagi sekadar estimasi candlestick spot Binance.
 - **Asynchronous Settlement Pipeline:** Posisi yang baru saja selesai di detik 00 dialihkan ke antrean `pending_settlement` dan dipantau berkala (5-30 detik) hingga oracle on-chain Binance selesai melakukan penyelesaian (settlement). Dashboard menampilkan status `⏳ VERIFIKASI SETTLEMENT ON-CHAIN` secara transparan.

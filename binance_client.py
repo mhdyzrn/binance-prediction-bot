@@ -831,9 +831,11 @@ class PredictionEngine:
 
             self.target_strike_price = official_strike if official_strike is not None else self.live_btc_price
 
+            market_name = f"{config.TARGET_ASSET} Naik atau Turun dalam {config.ROUND_MINUTES} Menit?"
             self.current_round = {
-                "title": f"{config.TARGET_ASSET} Naik atau Turun dalam {config.ROUND_MINUTES} menit",
-                "round_id": f"BTC-{expiry_dt.strftime('%H%M')}",
+                "title": market_name,
+                "market_name": market_name,
+                "round_id": f"{config.TARGET_ASSET}-{expiry_dt.strftime('%H%M')}",
                 "start_timestamp": round_start_timestamp,
                 "expiry_timestamp": expiry_timestamp,
                 "expiry_str": expiry_str,
@@ -892,8 +894,10 @@ class PredictionEngine:
         win_rate = (wins / total_trades * 100) if total_trades > 0 else 0.0
         net_pnl = sum(h.get("profit", 0.0) for h in active_hist)
 
+        market_name = f"{config.TARGET_ASSET} Naik atau Turun dalam {config.ROUND_MINUTES} Menit?"
         return {
-            "title": f"{config.TARGET_ASSET} Naik atau Turun dalam {config.ROUND_MINUTES} menit",
+            "title": market_name,
+            "market_name": market_name,
             "expiry_str": expiry_str,
             "strike_price": self.target_strike_price,
             "ref_price": self.live_btc_price,
