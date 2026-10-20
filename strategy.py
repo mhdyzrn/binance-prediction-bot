@@ -4,8 +4,8 @@ import config
 class PredictionStrategy:
     """
     Strategi Late-Sniper khusus pasar BTC 5 Menit:
-    - Selama 3.5 menit pertama (Hitung mundur > 01:15): Bot memantau pergerakan harga BTC
-    - Di sisa 75 detik terakhir (01:15 s.d 00:10): Jendela Sniper mengeksekusi order riil
+    - Selama 4 menit pertama (Hitung mundur > 00:50): Bot memantau pergerakan harga BTC
+    - Di sisa 50 detik terakhir (00:50 s.d 00:20): Jendela Sniper mengeksekusi order riil
       berdasarkan posisi harga spot BTC terhadap target strike.
     """
     def __init__(self):
