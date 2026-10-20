@@ -43,21 +43,17 @@ INITIAL_VIRTUAL_BALANCE = float(os.getenv("INITIAL_BALANCE", "10.0"))  # Saldo a
 SIM_BALANCE_FILE = "sim_balance.json"                 # File penyimpan saldo simulasi agar tidak ter-reset
 
 # ==========================================================
-# SISTEM AUTO-COMPOUNDING TIERED & STEP-DOWN RULE (V2.3)
+# SISTEM AUTO-COMPOUNDING TIERED & STEP-DOWN RULE (MAX $2)
 # ==========================================================
 ENABLE_AUTO_COMPOUND = os.getenv("ENABLE_AUTO_COMPOUND", "True").lower() == "true"
-MAX_COMPOUND_BET = float(os.getenv("MAX_COMPOUND_BET", "5.0"))  # Batas maksimal taruhan: $5.00 USDT
+MAX_COMPOUND_BET = float(os.getenv("MAX_COMPOUND_BET", "2.0"))  # Batas maksimal taruhan: $2.00 USDT
 
-# Skema Level Compounding dengan Jarak Lebih Lebar (Buffer Aman Anti-Drawdown):
+# Skema Level Compounding:
 # Tier 1: Saldo < $50.00    ➔ Bet $1.00 USDT
-# Tier 2: Saldo $50 - $99   ➔ Bet $2.00 USDT (Posisi saldo sekarang $66.41 ada di sini)
-# Tier 3: Saldo $100 - $199 ➔ Bet $3.00 USDT
-# Tier 4: Saldo >= $200.00  ➔ Bet $5.00 USDT (Batas Maksimal Terkunci)
+# Tier 2: Saldo >= $50.00   ➔ Bet $2.00 USDT (Batas Maksimal Terkunci $2)
 # Step-Down Rule: Jika saldo turun di bawah batas tier, taruhan otomatis turun (step-down) ke tier sebelumnya
 COMPOUND_TIERS = [
-    (200.0, 5.0, "Tier 4 ($200+ Max $5)"),
-    (100.0, 3.0, "Tier 3 ($100+)"),
-    (50.0,  2.0, "Tier 2 ($50+)"),
+    (50.0,  2.0, "Tier 2 ($50+ Max $2)"),
     (0.0,   1.0, "Tier 1 ($10+)"),
 ]
 
@@ -65,7 +61,7 @@ COMPOUND_TIERS = [
 def calculate_compound_bet(balance: float) -> tuple[float, str]:
     """
     Menghitung ukuran taruhan dinamis berdasarkan saldo saat ini.
-    Maksimal taruhan dibatasi $5.00 USDT saja.
+    Maksimal taruhan dibatasi $2.00 USDT (atau MAX_COMPOUND_BET).
     Menerapkan Step-Down Rule secara otomatis:
     - Jika saldo naik melewati batas tier -> taruhan naik ke tier berikutnya.
     - Jika saldo turun di bawah batas tier -> taruhan otomatis turun (step-down)
