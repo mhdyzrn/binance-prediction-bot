@@ -1034,6 +1034,7 @@ class PredictionEngine:
 
         still_pending = []
         has_new_resolution = False
+        existing_pos_ids = {h.get("position_id") for h in self.history if h.get("position_id")}
 
         for pending in self.pending_settlement:
             matched = None
@@ -1043,6 +1044,10 @@ class PredictionEngine:
 
             # Cari di riwayat settled resmi Binance
             for s in settled_list:
+                s_id = s.get("positionId")
+                if s_id and s_id in existing_pos_ids:
+                    continue
+
                 s_end_ts = s.get("endDate", 0) / 1000.0
                 s_round_str = datetime.fromtimestamp(s_end_ts).strftime("%H:%M:%S")
                 s_up = (s.get("outcomeName") == "Up")
