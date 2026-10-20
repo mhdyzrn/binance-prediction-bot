@@ -164,16 +164,21 @@ class BinanceClient:
 
     def get_prediction_balance_details(self) -> tuple[float, float, List[str]]:
         """
-        Mengambil detail saldo Web3 Prediction:
+        Mengambil detail saldo Web3 Prediction dan daftar token kemenangan yang siap di-klaim:
         Mengembalikan (wallet_balance, claimable_balance, claimable_token_ids)
         """
         wallet, _ = self.get_prediction_wallet()
         if not wallet or not wallet.get("walletAddress"):
             return 0.0, 0.0, []
 
+        headers = {"X-MBX-APIKEY": self.api_key}
+        bal = 0.0
+        claimable = 0.0
+        claimable_tokens = []
+
+        # 1. Ambil wallet balance & summary dari position/list
         url = f"{self.base_url}/sapi/v1/w3w/wallet/prediction/position/list"
         params = self._sign({"walletAddress": wallet["walletAddress"]})
-        headers = {"X-MBX-APIKEY": self.api_key}
         try:
             resp = self.session.get(url, headers=headers, params=params, timeout=(3.0, 5.0))
             if resp.status_code == 200:
@@ -181,21 +186,28 @@ class BinanceClient:
                 summary = data.get("summary", {})
                 bal = float(summary.get("walletBalance", 0.0))
                 claimable = float(summary.get("totalClaimableAmount", 0.0))
-
-                claimable_tokens = []
-                for p in data.get("positions", []):
-                    if p.get("canClaim") and p.get("tokenId"):
-                        claimable_tokens.append(p["tokenId"])
-
-                return bal, claimable, claimable_tokens
         except Exception:
             pass
-        return 0.0, 0.0, []
+
+        # 2. Ambil token ID kemenangan dari position/filter
+        filter_url = f"{self.base_url}/sapi/v1/w3w/wallet/prediction/position/filter"
+        f_params = self._sign({"walletAddress": wallet["walletAddress"]})
+        try:
+            f_resp = self.session.get(filter_url, headers=headers, params=f_params, timeout=(3.0, 5.0))
+            if f_resp.status_code == 200:
+                f_data = f_resp.json()
+                for p in f_data.get("positions", []):
+                    if p.get("canClaim") and p.get("tokenId"):
+                        claimable_tokens.append(p["tokenId"])
+        except Exception:
+            pass
+
+        return bal, claimable, claimable_tokens
 
     def claim_prediction_winnings(self, token_ids: Optional[List[str]] = None) -> tuple[bool, str]:
         """
         Klaim / redeem hasil kemenangan prediksi Web3 secara otomatis ke saldo wallet.
-        Menggunakan endpoint resmi POST /sapi/v1/w3w/wallet/prediction/batch-redeem.
+        Menggunakan endpoint resmi POST /sapi/v1/w3w/wallet/prediction/batch-redeem via signed query params.
         """
         wallet, err = self.get_prediction_wallet()
         if not wallet or not wallet.get("walletAddress") or not wallet.get("walletId"):
@@ -208,21 +220,19 @@ class BinanceClient:
             return False, "Tidak ada kemenangan tertunda yang perlu di-klaim"
 
         url = f"{self.base_url}/sapi/v1/w3w/wallet/prediction/batch-redeem"
-        params = self._sign({})
-        headers = {
-            "X-MBX-APIKEY": self.api_key,
-            "Content-Type": "application/json"
-        }
-        body = {
+        token_str = token_ids[0] if isinstance(token_ids, list) and len(token_ids) == 1 else ",".join(token_ids)
+        params = self._sign({
             "walletAddress": wallet["walletAddress"],
             "walletId": wallet["walletId"],
-            "tokenIds": token_ids,
+            "tokenIds": token_str,
             "chainId": "56"
-        }
+        })
+        headers = {"X-MBX-APIKEY": self.api_key}
+
         try:
-            resp = self.session.post(url, headers=headers, params=params, json=body, timeout=(4.0, 8.0))
+            resp = self.session.post(url, headers=headers, params=params, timeout=(4.0, 8.0))
             if resp.status_code == 200:
-                return True, f"Berhasil klaim {len(token_ids)} hadiah kemenangan"
+                return True, f"Berhasil klaim {len(token_ids)} hadiah kemenangan on-chain"
             data = resp.json()
             return False, data.get("msg", resp.text)
         except Exception as e:
@@ -414,6 +424,23 @@ class BinanceClient:
         except Exception:
             pass
         return None
+
+    def get_pending_claim_positions(self) -> List[Dict[str, Any]]:
+        """Mengambil posisi aktif / pending claim resmi dari Binance Web3 Prediction SAPI"""
+        wallet, _ = self.get_prediction_wallet()
+        if not wallet or not wallet.get("walletAddress"):
+            return []
+
+        url = f"{self.base_url}/sapi/v1/w3w/wallet/prediction/position/filter"
+        params = self._sign({"walletAddress": wallet["walletAddress"]})
+        headers = {"X-MBX-APIKEY": self.api_key}
+        try:
+            resp = self.session.get(url, headers=headers, params=params, timeout=(3.0, 5.0))
+            if resp.status_code == 200:
+                return resp.json().get("positions", [])
+        except Exception:
+            pass
+        return []
 
     def get_real_settled_history(self, limit: int = 20) -> List[Dict[str, Any]]:
         """
@@ -1022,15 +1049,20 @@ class PredictionEngine:
     def _check_pending_settlements(self):
         """
         Memeriksa status penyelesaian (settlement) resmi dari Binance SAPI untuk posisi real.
-        Binance Chainlink Oracle membutuhkan waktu 5-30 detik setelah detik 00 untuk finalisasi on-chain.
+        Mengecek posisi menang di position/filter (PENDING_CLAIM) dan posisi kalah di settled-history.
         """
         if not self.is_real or not self.pending_settlement:
             return
 
         try:
+            pending_claim_list = self.client.get_pending_claim_positions()
+        except Exception:
+            pending_claim_list = []
+
+        try:
             settled_list = self.client.get_real_settled_history(limit=10)
         except Exception:
-            return
+            settled_list = []
 
         still_pending = []
         has_new_resolution = False
@@ -1038,31 +1070,57 @@ class PredictionEngine:
 
         for pending in self.pending_settlement:
             matched = None
+            is_from_pending_claim = False
             pending_exp_ts = pending.get("expiry_timestamp", 0)
             pending_round_str = pending.get("expiry_str", "")[-8:]
             target_up = (pending["direction"] == "Naik")
 
-            # Cari di riwayat settled resmi Binance
-            for s in settled_list:
-                s_id = s.get("positionId")
-                if s_id and s_id in existing_pos_ids:
+            # 1. Periksa dulu di daftar posisi menang/klaim (position/filter)
+            for pc in pending_claim_list:
+                pc_id = pc.get("positionId")
+                if pc_id and pc_id in existing_pos_ids:
                     continue
 
-                s_end_ts = s.get("endDate", 0) / 1000.0
-                s_round_str = datetime.fromtimestamp(s_end_ts).strftime("%H:%M:%S")
-                s_up = (s.get("outcomeName") == "Up")
+                pc_end_ts = pc.get("endDate", 0) / 1000.0
+                pc_round_str = datetime.fromtimestamp(pc_end_ts).strftime("%H:%M:%S")
+                pc_up = (pc.get("outcomeName") == "Up")
 
-                # Cocokkan berdasarkan waktu berakhir ronde dan arah
-                if (abs(s_end_ts - pending_exp_ts) <= 60 or s_round_str == pending_round_str) and (target_up == s_up):
-                    matched = s
+                if (abs(pc_end_ts - pending_exp_ts) <= 60 or pc_round_str == pending_round_str) and (target_up == pc_up):
+                    matched = pc
+                    is_from_pending_claim = True
                     break
+
+            # 2. Jika tidak ada di pending_claim, cari di riwayat settled resmi Binance
+            if not matched:
+                for s in settled_list:
+                    s_id = s.get("positionId")
+                    if s_id and s_id in existing_pos_ids:
+                        continue
+
+                    s_end_ts = s.get("endDate", 0) / 1000.0
+                    s_round_str = datetime.fromtimestamp(s_end_ts).strftime("%H:%M:%S")
+                    s_up = (s.get("outcomeName") == "Up")
+
+                    if (abs(s_end_ts - pending_exp_ts) <= 60 or s_round_str == pending_round_str) and (target_up == s_up):
+                        matched = s
+                        is_from_pending_claim = False
+                        break
 
             if matched:
                 has_new_resolution = True
                 won = bool(matched.get("isWinner", False))
-                profit = round(float(matched.get("realizedPnl", 0.0)), 2)
-                amount = round(float(matched.get("totalCost", pending["amount"])), 2)
-                payout = round(amount + profit, 2) if won else 0.0
+                if is_from_pending_claim:
+                    shares = float(matched.get("shares", 0.0))
+                    amount = round(float(matched.get("totalCost", pending["amount"])), 2)
+                    payout = shares if won else 0.0
+                    profit = round(payout - amount, 2)
+                    # Otomatis klaim kemenangan ke saldo wallet on-chain
+                    if won and matched.get("canClaim") and matched.get("tokenId"):
+                        self.client.claim_prediction_winnings([matched["tokenId"]])
+                else:
+                    profit = round(float(matched.get("realizedPnl", 0.0)), 2)
+                    amount = round(float(matched.get("totalCost", pending["amount"])), 2)
+                    payout = round(amount + profit, 2) if won else 0.0
 
                 if won:
                     self.consecutive_losses = 0
@@ -1124,7 +1182,6 @@ class PredictionEngine:
         if has_new_resolution:
             self._save_history()
             try:
-                self.client.claim_prediction_winnings()
                 self.get_balance(force_refresh=True)
             except Exception:
                 pass

@@ -2,8 +2,10 @@
 
 Bot trading otomatis untuk pasar prediksi Binance menggunakan Python.
 
-## Fitur Utama (V3.3 Strict Position Verification & Capital Protection Edition)
+## Fitur Utama (V3.4 Official On-Chain Claim & Dual Settlement Pipeline)
 
+- **Official On-Chain Auto-Redeem (`batch-redeem`):** Memperbaiki parameter resmi Binance SAPI `batch-redeem` menggunakan signed query params sehingga hadiah kemenangan langsung di-klaim (*redeemed*) otomatis di blockchain dan langsung masuk ke saldo wallet USDT aktif.
+- **Dual Settlement Pipeline (`position/filter` & `settled-history`):** Mendeteksi posisi pemenang secara instan via `position/filter` (`PENDING_CLAIM`) dan posisi kalah via `settled-history`, menghilangkan jeda fallback dan sinkron 100% dengan smart contract Binance.
 - **Strict Position Re-Matching Guard:** Memastikan posisi lama yang sudah tercatat di riwayat tidak akan pernah dicocokkan ulang saat memeriksa status penyelesaian on-chain Binance SAPI.
 - **Dynamic Market Name & Identity:** Menampilkan nama pasar prediksi dinamis pada dashboard utama, terminal startup, dan laporan sesi (contoh: *BTC Naik atau Turun dalam 5 Menit?*) yang menyesuaikan secara otomatis dengan aset dan durasi ronde aktif.
 - **Official On-Chain Settlement Sync:** Pada mode Real, hasil Menang/Kalah (Win/Loss) diverifikasi langsung dari endpoint resmi Binance Web3 Prediction SAPI `GET /sapi/v1/w3w/wallet/prediction/position/settled-history`. Menghilangkan 100% selisih kalkulasi antara estimasi harga spot lokal dan hasil resolusi on-chain Chainlink Oracle Binance.
