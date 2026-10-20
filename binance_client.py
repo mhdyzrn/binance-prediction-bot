@@ -966,7 +966,7 @@ class PredictionEngine:
             }
 
         # Cek pembaruan strike jika sebelumnya fallback dan topik Web3 baru sudah terbuka
-        if self.is_real and self._strike_is_fallback and (seconds_left > 270):
+        if self.is_real and self._strike_is_fallback and (seconds_left > config.SNIPER_TRIGGER_SECONDS):
             real_strike = self.client.get_prediction_strike()
             if real_strike is not None:
                 self.target_strike_price = real_strike
@@ -1219,7 +1219,12 @@ class PredictionEngine:
 
             if matched:
                 has_new_resolution = True
-                won = bool(matched.get("isWinner", False))
+                if matched.get("isWinner") is not None:
+                    won = bool(matched.get("isWinner"))
+                else:
+                    target_name = "Up" if pending["direction"] == "Naik" else "Down"
+                    won = (str(matched.get("finalOutcome", "")).capitalize() == target_name)
+
                 raw_pnl = matched.get("realizedPnl")
                 amount = round(float(matched.get("totalCost", pending["amount"])), 2)
 
@@ -1261,9 +1266,9 @@ class PredictionEngine:
                     "market_title": matched.get("marketTopicTitle")
                 })
             else:
-                # Cek apakah sudah timeout (> 90 detik dari waktu penyelesaian diajukan)
+                # Cek apakah sudah timeout (> 240 detik / 4 menit dari waktu penyelesaian diajukan)
                 elapsed = time.time() - pending.get("resolution_submitted_at", time.time())
-                if elapsed > 90:
+                if elapsed > 240:
                     # Fallback jika Binance SAPI sangat lambat merespon
                     has_new_resolution = True
                     final_p = self.live_btc_price

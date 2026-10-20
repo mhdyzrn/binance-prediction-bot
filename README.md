@@ -2,8 +2,15 @@
 
 Bot trading otomatis untuk pasar prediksi Binance menggunakan Python.
 
-## Fitur Utama (V3.6 Anti-Double Bet, Time-Sync & Termux Loop Optimization)
+## Fitur Utama (V3.7 100% Binance Rule & Oracle Lifecycle Alignment)
 
+- **100% Binance Web3 Prediction Lifecycle Alignment:** Seluruh tahapan trading bot diselaraskan secara penuh dengan siklus hidup resmi pasar prediksi Binance (Predict.fun di BNB Chain):
+  1. *Fase Strike Snapshot:* Mengambil harga pembukaan resmi Chainlink Oracle (`variantData.startPrice`) langsung dari pasar Web3.
+  2. *Fase Sniper Window (01:15 - 00:25):* Mengeksekusi order saat tren lilin 5M telah terbentuk 80-90% dan buku pesanan Binance masih memiliki likuiditas penuh.
+  3. *Fase Penutupan Jendela (00:25 - 00:00):* Menghentikan order baru untuk menghindari penolakan *lack of liquidity* akibat penutupan order book oleh Binance.
+  4. *Fase On-Chain Finalization (00:00 - 00:35):* Posisi dialihkan ke antrean verifikasi on-chain dan menunggu hasil resmi Chainlink Oracle selesai dicatat di blockchain BNB Chain tanpa evaluasi terburu-buru.
+  5. *Fase Auto-Redeem & Reconciliation:* Klaim hadiah pemenang secara otomatis via `batch-redeem` on-chain dan mencatat keuntungan/kerugian riil identik dengan aplikasi Binance.
+- **Extended Settlement Timeout (240 Detik):** Memperpanjang toleransi tunggu penyelesaian on-chain menjadi 4 menit (240 detik), memastikan bot tidak pernah melakukan fallback harga spot lokal saat jaringan blockchain mengalami kepadatan.
 - **Loop Sleep & CPU Optimization (Termux Friendly):** Memperbaiki penempatan jeda perulangan (*adaptive sleep*) ke putaran utama bot (1s saat jendela sniper, 2s saat observasi santai). Mencegah loop tanpa jeda, menghemat daya baterai, konsumsi CPU, dan kuota data ponsel Android, serta menghindari limit request Binance API.
 - **Double Betting Prevention & Active Position Recovery:** Mendeteksi posisi yang sedang berjalan di Binance SAPI saat startup atau reconnect. Posisi otomatis dipulihkan ke status aktif sehingga bot tidak akan pernah memasang taruhan ganda pada ronde yang sama.
 - **Server Time Drift Auto-Sync & recvWindow 10000ms:** Menghitung selisih jam ponsel dengan server Binance secara otomatis saat booting dan memperlebar batas toleransi `recvWindow` ke 10.000 ms (10 detik), mencegah kegagalan order akibat error timestamp `-1021`.
