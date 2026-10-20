@@ -2,8 +2,10 @@
 
 Bot trading otomatis untuk pasar prediksi Binance menggunakan Python.
 
-## Fitur Utama (V3.4 Official On-Chain Claim & Dual Settlement Pipeline)
+## Fitur Utama (V3.5 Strict Oracle Finalization Guard & SAPI Sync)
 
+- **Strict Oracle Finalization Guard:** Menjamin posisi tidak akan pernah diselesaikan secara prematur di detik 00-01 saat Chainlink Oracle Binance masih dalam proses finalisasi on-chain (15–35 detik). Posisi tetap berada di antrean `pending_settlement` dengan indikator `⏳ VERIFIKASI SETTLEMENT ON-CHAIN` hingga status resmi berubah menjadi `PENDING_CLAIM`, `CLAIMED`, atau `SETTLED`.
+- **Zero Premature Loss Resolution:** Mencegah bug di mana posisi menang terbaca sebagai *loss* karena pembacaan awal saat nilai `isWinner` / `finalOutcome` masih `null` di SAPI sebelum transaksi on-chain diverifikasi.
 - **Official On-Chain Auto-Redeem (`batch-redeem`):** Memperbaiki parameter resmi Binance SAPI `batch-redeem` menggunakan signed query params sehingga hadiah kemenangan langsung di-klaim (*redeemed*) otomatis di blockchain dan langsung masuk ke saldo wallet USDT aktif.
 - **Dual Settlement Pipeline (`position/filter` & `settled-history`):** Mendeteksi posisi pemenang secara instan via `position/filter` (`PENDING_CLAIM`) dan posisi kalah via `settled-history`, menghilangkan jeda fallback dan sinkron 100% dengan smart contract Binance.
 - **Strict Position Re-Matching Guard:** Memastikan posisi lama yang sudah tercatat di riwayat tidak akan pernah dicocokkan ulang saat memeriksa status penyelesaian on-chain Binance SAPI.

@@ -1081,6 +1081,13 @@ class PredictionEngine:
                 if pc_id and pc_id in existing_pos_ids:
                     continue
 
+                # KUNCI UTAMA: Hanya proses jika posisi sudah resmi diselesaikan oleh Oracle Chainlink!
+                status = str(pc.get("positionStatus", "")).upper()
+                final_outcome = pc.get("finalOutcome")
+                # Jika status masih ACTIVE/REGISTERED dan finalOutcome masih kosong, oracle belum selesai (tunggu 5-35s)
+                if status not in ["PENDING_CLAIM", "CLAIMED", "SETTLED"] and not final_outcome:
+                    continue
+
                 pc_end_ts = pc.get("endDate", 0) / 1000.0
                 pc_round_str = datetime.fromtimestamp(pc_end_ts).strftime("%H:%M:%S")
                 pc_up = (pc.get("outcomeName") == "Up")
@@ -1097,6 +1104,11 @@ class PredictionEngine:
                     if s_id and s_id in existing_pos_ids:
                         continue
 
+                    # Pastikan status posisi settled resmi sudah selesai
+                    s_status = str(s.get("positionStatus", "")).upper()
+                    if s_status and s_status not in ["SETTLED", "CLAIMED"] and not s.get("finalOutcome"):
+                        continue
+
                     s_end_ts = s.get("endDate", 0) / 1000.0
                     s_round_str = datetime.fromtimestamp(s_end_ts).strftime("%H:%M:%S")
                     s_up = (s.get("outcomeName") == "Up")
@@ -1109,18 +1121,25 @@ class PredictionEngine:
             if matched:
                 has_new_resolution = True
                 won = bool(matched.get("isWinner", False))
-                if is_from_pending_claim:
+                raw_pnl = matched.get("realizedPnl")
+                amount = round(float(matched.get("totalCost", pending["amount"])), 2)
+
+                if raw_pnl is not None and float(raw_pnl) != 0:
+                    profit = round(float(raw_pnl), 2)
+                    payout = round(amount + profit, 2) if won else 0.0
+                elif is_from_pending_claim:
                     shares = float(matched.get("shares", 0.0))
-                    amount = round(float(matched.get("totalCost", pending["amount"])), 2)
                     payout = shares if won else 0.0
                     profit = round(payout - amount, 2)
-                    # Otomatis klaim kemenangan ke saldo wallet on-chain
-                    if won and matched.get("canClaim") and matched.get("tokenId"):
-                        self.client.claim_prediction_winnings([matched["tokenId"]])
                 else:
                     profit = round(float(matched.get("realizedPnl", 0.0)), 2)
-                    amount = round(float(matched.get("totalCost", pending["amount"])), 2)
+                    if profit == 0.0 and not won:
+                        profit = -amount
                     payout = round(amount + profit, 2) if won else 0.0
+
+                # Otomatis klaim kemenangan ke saldo wallet on-chain jika belum di-klaim
+                if won and matched.get("canClaim") and matched.get("tokenId"):
+                    self.client.claim_prediction_winnings([matched["tokenId"]])
 
                 if won:
                     self.consecutive_losses = 0
