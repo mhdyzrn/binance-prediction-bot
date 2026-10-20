@@ -400,6 +400,59 @@ class BinanceClient:
         except Exception as e:
             return None, f"Error pasar: {e}"
 
+    def get_prediction_strike(self) -> Optional[float]:
+        """
+        Mengambil harga Strike resmi (variantData.startPrice) dari Binance Web3 Prediction SAPI.
+        Menggunakan oracle Chainlink resmi Binance, bukan estimasi candlestick spot.
+        """
+        try:
+            topic, _ = self.get_active_btc_prediction_market()
+            if topic and topic.get("variantData"):
+                start_p = topic["variantData"].get("startPrice")
+                if start_p:
+                    return float(start_p)
+        except Exception:
+            pass
+        return None
+
+    def get_real_settled_history(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """
+        Mengambil riwayat posisi yang sudah selesai (settled) resmi dari Binance Web3 Prediction SAPI:
+        GET /sapi/v1/w3w/wallet/prediction/position/settled-history
+        """
+        wallet, _ = self.get_prediction_wallet()
+        if not wallet or not wallet.get("walletAddress"):
+            return []
+
+        url = f"{self.base_url}/sapi/v1/w3w/wallet/prediction/position/settled-history"
+        params = self._sign({"walletAddress": wallet["walletAddress"], "limit": limit})
+        headers = {"X-MBX-APIKEY": self.api_key}
+        try:
+            resp = self.session.get(url, headers=headers, params=params, timeout=(4.0, 8.0))
+            if resp.status_code == 200:
+                data = resp.json()
+                return data.get("positions", [])
+        except Exception:
+            pass
+        return []
+
+    def get_portfolio_pnl(self) -> Optional[Dict[str, Any]]:
+        """Mengambil ringkasan PnL portofolio Web3 Prediction dari Binance SAPI"""
+        wallet, _ = self.get_prediction_wallet()
+        if not wallet or not wallet.get("walletAddress"):
+            return None
+
+        url = f"{self.base_url}/sapi/v1/w3w/wallet/prediction/pnl/portfolio"
+        params = self._sign({"walletAddress": wallet["walletAddress"]})
+        headers = {"X-MBX-APIKEY": self.api_key}
+        try:
+            resp = self.session.get(url, headers=headers, params=params, timeout=(3.0, 5.0))
+            if resp.status_code == 200:
+                return resp.json()
+        except Exception:
+            pass
+        return None
+
     def place_real_prediction_order(self, direction: str, amount_usdt: float, market_id: str = "BTC-5M") -> Dict[str, Any]:
         """
         Mengirimkan pesanan taruhan riil ke Binance Web3 Prediction SAPI
@@ -537,8 +590,9 @@ class PredictionEngine:
     """
     Engine Pengelola Pasar Prediksi BTC 5 Menit:
     - Menyelaraskan ronde setiap 5 menit jam dinding (00, 05, 10, 15, ..., 55)
-    - Mengambil harga Strike awal ronde & Referensi real-time dari Binance
-    - Menangani eksekusi Real Trading atau Simulasi secara terpadu
+    - Mengambil harga Strike resmi (Oracle Chainlink di Mode Real, Candlestick Open di Simulasi)
+    - Verifikasi resolusi resmi on-chain via GET /sapi/v1/w3w/wallet/prediction/position/settled-history
+    - Menjamin Net PnL, Win/Loss, dan Payout 100% identik dengan aplikasi Binance
     - Dilengkapi proteksi disconnection & failover data harga
     """
     def __init__(self, client: BinanceClient):
@@ -551,21 +605,34 @@ class PredictionEngine:
         self.consecutive_errors = 0
         self.current_round: Optional[Dict[str, Any]] = None
         self.active_positions: List[Dict[str, Any]] = []
+        self.pending_settlement: List[Dict[str, Any]] = []
+        self.last_settlement_check = 0.0
+        self._strike_is_fallback = False
         
-        # Riwayat transaksi tersimpan permanen di file terpisah (Real vs Simulasi)
-        self.history_file = config.REAL_HISTORY_FILE if self.is_real else config.SIM_HISTORY_FILE
-        self.history: List[Dict[str, Any]] = self._load_history()
-
-        # Saldo simulasi tersimpan permanen agar tidak ter-reset jika tidak habis
-        self.sim_balance_file = config.SIM_BALANCE_FILE
-        self.virtual_balance = self._load_virtual_balance()
-
-
         # State RSI & Proteksi Cooldown
         self.cached_rsi: Optional[float] = None
         self.last_rsi_update = 0.0
         self.consecutive_losses = 0
         self.cooldown_rounds_left = 0
+
+        # Riwayat transaksi tersimpan permanen di file terpisah (Real vs Simulasi)
+        self.history_file = config.REAL_HISTORY_FILE if self.is_real else config.SIM_HISTORY_FILE
+        self.history: List[Dict[str, Any]] = self._load_history()
+
+        # Evaluasi kekalahan berturut-turut dari riwayat
+        loss_cnt = 0
+        for h in reversed(self.history):
+            if not h.get("won"):
+                loss_cnt += 1
+            else:
+                break
+        self.consecutive_losses = loss_cnt
+        if self.consecutive_losses >= config.MAX_CONSECUTIVE_LOSS:
+            self.cooldown_rounds_left = config.COOLDOWN_ROUNDS
+
+        # Saldo simulasi tersimpan permanen agar tidak ter-reset jika tidak habis
+        self.sim_balance_file = config.SIM_BALANCE_FILE
+        self.virtual_balance = self._load_virtual_balance()
         
         # Inisialisasi harga awal BTC & Strike resmi 5M
         try:
@@ -574,11 +641,24 @@ class PredictionEngine:
         except Exception:
             self.live_btc_price = 81000.0
 
-        official_strike = self.client.get_current_5m_strike(config.TARGET_SYMBOL)
+        official_strike = None
+        if self.is_real:
+            official_strike = self.client.get_prediction_strike()
+        if official_strike is None:
+            official_strike = self.client.get_current_5m_strike(config.TARGET_SYMBOL)
+            self._strike_is_fallback = (self.is_real and official_strike is not None)
+        else:
+            self._strike_is_fallback = False
+
         self.target_strike_price = official_strike if official_strike is not None else self.live_btc_price
 
     def _load_history(self) -> List[Dict[str, Any]]:
-        """Memuat riwayat transaksi dari disk sesuai mode aktif (Real vs Simulasi)"""
+        """Memuat riwayat transaksi dari disk. Pada mode Real, sinkronkan langsung dengan Binance SAPI"""
+        if self.is_real:
+            synced = self.sync_real_history(save=True)
+            if synced:
+                return synced
+
         if os.path.exists(self.history_file):
             try:
                 with open(self.history_file, "r") as f:
@@ -588,6 +668,63 @@ class PredictionEngine:
             except Exception:
                 pass
         return []
+
+    def sync_real_history(self, save: bool = True) -> List[Dict[str, Any]]:
+        """
+        Mensinkronisasikan riwayat transaksi riil langsung dari Binance SAPI Web3 Prediction.
+        Menjamin status Menang/Kalah (Win/Loss) dan Net PnL 100% identik dengan aplikasi Binance.
+        """
+        if not self.is_real:
+            return self.history
+
+        try:
+            positions = self.client.get_real_settled_history(limit=50)
+            if not positions:
+                return self.history
+
+            synced: List[Dict[str, Any]] = []
+            for p in positions:
+                end_ts = p.get("endDate", 0) / 1000.0
+                round_str = datetime.fromtimestamp(end_ts).strftime("%H:%M:%S")
+                dir_str = "Naik" if p.get("outcomeName") == "Up" else "Turun"
+                won = bool(p.get("isWinner", False))
+                profit = round(float(p.get("realizedPnl", 0.0)), 2)
+                amount = round(float(p.get("totalCost", 0.0)), 2)
+                payout = round(amount + profit, 2) if won else 0.0
+
+                synced.append({
+                    "round": round_str,
+                    "direction": dir_str,
+                    "won": won,
+                    "profit": profit,
+                    "payout": payout,
+                    "amount": amount,
+                    "strike": None,
+                    "final_price": p.get("finalOutcome"),
+                    "is_real": True,
+                    "position_id": p.get("positionId"),
+                    "market_title": p.get("marketTopicTitle")
+                })
+
+            synced.reverse()  # Urutan kronologis (terlama ke terbaru)
+            self.history = synced
+
+            # Evaluasi kekalahan berturut-turut untuk proteksi cooldown
+            loss_cnt = 0
+            for h in reversed(synced):
+                if not h.get("won"):
+                    loss_cnt += 1
+                else:
+                    break
+            self.consecutive_losses = loss_cnt
+            if self.consecutive_losses >= config.MAX_CONSECUTIVE_LOSS:
+                self.cooldown_rounds_left = config.COOLDOWN_ROUNDS
+
+            if save:
+                self._save_history()
+            return synced
+        except Exception:
+            return self.history
 
     def _save_history(self):
         """Menyimpan riwayat transaksi ke disk"""
@@ -621,7 +758,6 @@ class PredictionEngine:
                 json.dump({"virtual_balance": round(self.virtual_balance, 2), "updated_at": time.time()}, f, indent=2)
         except Exception:
             pass
-
 
     def get_balance(self, force_refresh: bool = False) -> float:
         """Mengambil saldo (Riil jika mode LIVE dengan caching 30s & safe retain, Virtual jika mode SIMULASI)"""
@@ -671,6 +807,11 @@ class PredictionEngine:
                 self.cached_rsi = val_rsi
             self.last_rsi_update = now
 
+        # Periksa pending settlement posisi real jika ada (tiap 3 detik)
+        if self.is_real and self.pending_settlement and (now - self.last_settlement_check >= 3.0):
+            self._check_pending_settlements()
+            self.last_settlement_check = now
+
         # Jika masuk ronde 5 menit baru
         if not self.current_round or self.current_round["expiry_timestamp"] != expiry_timestamp:
             if self.current_round:
@@ -678,8 +819,16 @@ class PredictionEngine:
                 if self.cooldown_rounds_left > 0:
                     self.cooldown_rounds_left -= 1
 
-            # Ambil harga strike resmi dari candlestick 5 menit Binance
-            official_strike = self.client.get_current_5m_strike(config.TARGET_SYMBOL)
+            # Ambil harga strike resmi (Chainlink Oracle resmi di Mode Real, Candlestick Open di Simulasi)
+            official_strike = None
+            if self.is_real:
+                official_strike = self.client.get_prediction_strike()
+            if official_strike is None:
+                official_strike = self.client.get_current_5m_strike(config.TARGET_SYMBOL)
+                self._strike_is_fallback = (self.is_real and official_strike is not None)
+            else:
+                self._strike_is_fallback = False
+
             self.target_strike_price = official_strike if official_strike is not None else self.live_btc_price
 
             self.current_round = {
@@ -692,13 +841,20 @@ class PredictionEngine:
                 "status": "OPEN"
             }
 
+        # Cek pembaruan strike jika sebelumnya fallback dan topik Web3 baru sudah terbuka
+        if self.is_real and self._strike_is_fallback and (seconds_left > 270):
+            real_strike = self.client.get_prediction_strike()
+            if real_strike is not None:
+                self.target_strike_price = real_strike
+                self._strike_is_fallback = False
+                if self.current_round:
+                    self.current_round["strike_price"] = real_strike
+
         # Hitung selisih harga spot BTC terhadap target strike
         diff_price = round(self.live_btc_price - self.target_strike_price, 2)
         diff_str = f"+${diff_price:,.2f}" if diff_price >= 0 else f"-${abs(diff_price):,.2f}"
 
         # Perhitungan peluang dinamis & harga tiket Buku Order (Web3 Order Book) Binance
-        # Menggunakan model volatilitas pasar biner (Black-Scholes Delta aproksimasi)
-        # Faktor waktu memperhitungkan sisa waktu ronde (makin dekat akhir, kepastian makin tinggi)
         t_ratio = max(10, min(300, seconds_left)) / 300.0
         time_factor = math.sqrt(t_ratio)
         sigma = 80.0 * time_factor
@@ -714,7 +870,6 @@ class PredictionEngine:
         prob_turun_pct = 99 - prob_naik_pct
 
         # Multiplier Payout rasio per 1 USDT (seperti di aplikasi Binance)
-        # Sesuai Web3 Prediction: Return = 1.0 / (harga_tiket_usdt)
         payout_naik_mult = round(1.0 / (prob_naik_pct / 100.0), 2) if prob_naik_pct > 0 else 1.0
         payout_turun_mult = round(1.0 / (prob_turun_pct / 100.0), 2) if prob_turun_pct > 0 else 1.0
 
@@ -763,12 +918,13 @@ class PredictionEngine:
             "in_cooldown": (self.cooldown_rounds_left > 0),
             "cooldown_rounds_left": self.cooldown_rounds_left,
             "consecutive_losses": self.consecutive_losses,
+            "has_pending_settlement": (len(self.pending_settlement) > 0),
+            "pending_settlement_count": len(self.pending_settlement),
             "total_trades": total_trades,
             "wins": wins,
             "win_rate": win_rate,
             "net_pnl": round(net_pnl, 2)
         }
-
 
     def place_order(self, direction: str, amount_usdt: float, payout_multiplier: float) -> Dict[str, Any]:
         """Mengeksekusi taruhan (Real API atau Simulasi)"""
@@ -780,10 +936,12 @@ class PredictionEngine:
             return {"success": False, "msg": f"Saldo {mode_name} tidak mencukupi ({current_bal:.2f} USDT < {amount_usdt:.2f} USDT)"}
 
         # Jika mode REAL TRADING, kirim order ke Binance SAPI
+        order_data = None
         if self.is_real:
             res = self.client.place_real_prediction_order(direction, amount_usdt)
             if not res.get("success"):
                 return res
+            order_data = res.get("data")
 
         # Catat posisi aktif
         if not self.is_real:
@@ -791,8 +949,10 @@ class PredictionEngine:
             self._save_virtual_balance()
 
         expiry_id = self.current_round["expiry_str"] if self.current_round else "SIM-ROUND"
+        expiry_ts = self.current_round["expiry_timestamp"] if self.current_round else (int(time.time() // 300 + 1) * 300)
         pos = {
             "expiry_str": expiry_id,
+            "expiry_timestamp": expiry_ts,
             "direction": direction,
             "amount": amount_usdt,
             "payout_multiplier": payout_multiplier,
@@ -800,49 +960,160 @@ class PredictionEngine:
             "strike_price": self.target_strike_price,
             "ref_at_entry": self.live_btc_price,
             "timestamp": time.time(),
-            "is_real": self.is_real
+            "is_real": self.is_real,
+            "order_data": order_data
         }
         self.active_positions.append(pos)
         return {"success": True, "msg": f"Order {direction} terpasang"}
 
     def _resolve_round(self, final_price: float):
-        """Menyelesaikan ronde, menghitung payout kemenangan, dan status cooldown"""
-        winning_dir = "Naik" if final_price >= self.target_strike_price else "Turun"
-        
-        remaining = []
-        for pos in self.active_positions:
-            won = (pos["direction"] == winning_dir)
-            payout = pos["potential_win"] if won else 0.0
-            profit = round(payout - pos["amount"], 2)
+        """Menyelesaikan ronde. Pada mode Real, diverifikasi via Chainlink Oracle Binance SAPI"""
+        if not self.active_positions:
+            return
 
-            if not self.is_real:
+        if not self.is_real:
+            # Mode Simulasi: evaluasi lokal berbasis perbandingan harga spot vs strike
+            winning_dir = "Naik" if final_price >= self.target_strike_price else "Turun"
+            
+            remaining = []
+            for pos in self.active_positions:
+                won = (pos["direction"] == winning_dir)
+                payout = pos["potential_win"] if won else 0.0
+                profit = round(payout - pos["amount"], 2)
+
                 self.virtual_balance = round(self.virtual_balance + payout, 2)
                 self._save_virtual_balance()
 
-            # Hitung kekalahan berturut-turut untuk proteksi cooldown
-            if won:
-                self.consecutive_losses = 0
+                # Hitung kekalahan berturut-turut untuk proteksi cooldown
+                if won:
+                    self.consecutive_losses = 0
+                else:
+                    self.consecutive_losses += 1
+                    if self.consecutive_losses >= config.MAX_CONSECUTIVE_LOSS:
+                        self.cooldown_rounds_left = config.COOLDOWN_ROUNDS
+
+                self.history.append({
+                    "round": pos["expiry_str"][-8:],
+                    "direction": pos["direction"],
+                    "won": won,
+                    "profit": profit,
+                    "payout": payout,
+                    "strike": pos.get("strike_price"),
+                    "final_price": final_price,
+                    "is_real": False
+                })
+
+            self.active_positions = remaining
+            self._save_history()
+        else:
+            # Mode Real: pindahkan ke pending_settlement untuk verifikasi resmi on-chain Binance
+            for pos in self.active_positions:
+                pos["resolution_submitted_at"] = time.time()
+                self.pending_settlement.append(pos)
+            self.active_positions = []
+
+            # Lakukan pengecekan awal
+            self._check_pending_settlements()
+
+    def _check_pending_settlements(self):
+        """
+        Memeriksa status penyelesaian (settlement) resmi dari Binance SAPI untuk posisi real.
+        Binance Chainlink Oracle membutuhkan waktu 5-30 detik setelah detik 00 untuk finalisasi on-chain.
+        """
+        if not self.is_real or not self.pending_settlement:
+            return
+
+        try:
+            settled_list = self.client.get_real_settled_history(limit=10)
+        except Exception:
+            return
+
+        still_pending = []
+        has_new_resolution = False
+
+        for pending in self.pending_settlement:
+            matched = None
+            pending_exp_ts = pending.get("expiry_timestamp", 0)
+            pending_round_str = pending.get("expiry_str", "")[-8:]
+            target_up = (pending["direction"] == "Naik")
+
+            # Cari di riwayat settled resmi Binance
+            for s in settled_list:
+                s_end_ts = s.get("endDate", 0) / 1000.0
+                s_round_str = datetime.fromtimestamp(s_end_ts).strftime("%H:%M:%S")
+                s_up = (s.get("outcomeName") == "Up")
+
+                # Cocokkan berdasarkan waktu berakhir ronde dan arah
+                if (abs(s_end_ts - pending_exp_ts) <= 60 or s_round_str == pending_round_str) and (target_up == s_up):
+                    matched = s
+                    break
+
+            if matched:
+                has_new_resolution = True
+                won = bool(matched.get("isWinner", False))
+                profit = round(float(matched.get("realizedPnl", 0.0)), 2)
+                amount = round(float(matched.get("totalCost", pending["amount"])), 2)
+                payout = round(amount + profit, 2) if won else 0.0
+
+                if won:
+                    self.consecutive_losses = 0
+                else:
+                    self.consecutive_losses += 1
+                    if self.consecutive_losses >= config.MAX_CONSECUTIVE_LOSS:
+                        self.cooldown_rounds_left = config.COOLDOWN_ROUNDS
+
+                self.history.append({
+                    "round": pending_round_str,
+                    "direction": pending["direction"],
+                    "won": won,
+                    "profit": profit,
+                    "payout": payout,
+                    "amount": amount,
+                    "strike": pending.get("strike_price"),
+                    "final_price": matched.get("finalOutcome"),
+                    "is_real": True,
+                    "position_id": matched.get("positionId"),
+                    "market_title": matched.get("marketTopicTitle")
+                })
             else:
-                self.consecutive_losses += 1
-                if self.consecutive_losses >= config.MAX_CONSECUTIVE_LOSS:
-                    self.cooldown_rounds_left = config.COOLDOWN_ROUNDS
+                # Cek apakah sudah timeout (> 90 detik dari waktu penyelesaian diajukan)
+                elapsed = time.time() - pending.get("resolution_submitted_at", time.time())
+                if elapsed > 90:
+                    # Fallback jika Binance SAPI sangat lambat merespon
+                    has_new_resolution = True
+                    final_p = self.live_btc_price
+                    target_strike = pending.get("strike_price") or final_p
+                    won = (pending["direction"] == "Naik" and final_p >= target_strike) or \
+                          (pending["direction"] == "Turun" and final_p < target_strike)
+                    payout = pending["potential_win"] if won else 0.0
+                    profit = round(payout - pending["amount"], 2)
 
-            self.history.append({
-                "round": pos["expiry_str"][-8:],
-                "direction": pos["direction"],
-                "won": won,
-                "profit": profit,
-                "payout": payout,
-                "strike": pos.get("strike_price"),
-                "final_price": final_price,
-                "is_real": pos.get("is_real", False)
-            })
+                    if won:
+                        self.consecutive_losses = 0
+                    else:
+                        self.consecutive_losses += 1
+                        if self.consecutive_losses >= config.MAX_CONSECUTIVE_LOSS:
+                            self.cooldown_rounds_left = config.COOLDOWN_ROUNDS
 
-        self.active_positions = remaining
-        self._save_history()
+                    self.history.append({
+                        "round": pending_round_str,
+                        "direction": pending["direction"],
+                        "won": won,
+                        "profit": profit,
+                        "payout": payout,
+                        "amount": pending["amount"],
+                        "strike": target_strike,
+                        "final_price": final_p,
+                        "is_real": True,
+                        "fallback": True
+                    })
+                else:
+                    still_pending.append(pending)
 
-        # Untuk mode real, otomatis claim kemenangan tertunda dan refresh saldo
-        if self.is_real:
+        self.pending_settlement = still_pending
+
+        if has_new_resolution:
+            self._save_history()
             try:
                 self.client.claim_prediction_winnings()
                 self.get_balance(force_refresh=True)

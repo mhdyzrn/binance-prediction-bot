@@ -113,6 +113,9 @@ class BinanceAppPredictionBot:
         else:
             if not is_online:
                 lines.append(f"  Status Bot      : \033[1;91m⚠ Jaringan Terputus! Reconnecting...\033[0m")
+            elif m.get("has_pending_settlement"):
+                lines.append("  Sinyal Sniper   : \033[1;93m⏳ VERIFIKASI SETTLEMENT ON-CHAIN\033[0m")
+                lines.append(f"  Status Bot      : \033[1;93m{spinner_char} Menunggu Chainlink Oracle Binance...\033[0m")
             elif signal["action"] == "OBSERVE":
                 pred = "▲ NAIK" if m["diff_val"] >= 0 else "▼ TURUN"
                 pred_col = "\033[1;92m" if m["diff_val"] >= 0 else "\033[1;91m"
