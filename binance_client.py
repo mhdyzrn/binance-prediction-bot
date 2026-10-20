@@ -348,6 +348,36 @@ class BinanceClient:
         msg = f"Koneksi berhasil! (Prediction: {pred_bal:.2f} USDT, Spot: {spot_bal:.2f} USDT)"
         return True, msg, active_bal
 
+    def check_sas_authorization(self) -> tuple[bool, str]:
+        """Memeriksa apakah izin Secure Auto-Signing (SAS) sudah aktif di aplikasi Binance"""
+        wallet, err = self.get_prediction_wallet()
+        if not wallet or not wallet.get("walletAddress") or not wallet.get("walletId"):
+            return False, err or "Wallet Web3 tidak ditemukan"
+
+        url = f"{self.base_url}/sapi/v1/w3w/wallet/prediction/trade/place-order-bundle"
+        params = self._sign({
+            "walletAddress": wallet["walletAddress"],
+            "walletId": wallet["walletId"],
+            "quoteId": "sas_probe_check",
+            "orderType": "MARKET",
+            "timeInForce": "FOK",
+            "slippageBps": 2000,
+            "fundingSource": "MPC",
+            "accountType": "SPOT"
+        })
+        headers = {"X-MBX-APIKEY": self.api_key}
+        try:
+            resp = self.session.post(url, headers=headers, params=params, timeout=(3.0, 5.0))
+            data = resp.json()
+            code = data.get("code")
+            msg = data.get("msg", "")
+            if code == -31003 or "SAS authorization" in msg:
+                return False, "SAS belum diaktifkan di aplikasi Binance"
+            # Jika lolos dari error -31003 (misal error quoteId invalid), berarti SAS sudah aktif
+            return True, "SAS aktif"
+        except Exception as e:
+            return False, str(e)
+
     def get_active_btc_prediction_market(self) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
         """Mengambil data pasar BTC 5m resmi dari Binance Web3 Prediction. Mengembalikan (market, err_msg)"""
         url = f"{self.base_url}/sapi/v1/w3w/wallet/prediction/market/list"
@@ -474,7 +504,8 @@ class BinanceClient:
                 "orderType": "MARKET",
                 "timeInForce": "FOK",
                 "slippageBps": slippage,
-                "fundingSource": funding_source
+                "fundingSource": funding_source,
+                "accountType": "SPOT"
             }
             o_params = self._sign(o_params)
             o_resp = self.session.post(order_url, headers=headers, params=o_params, timeout=(3.0, 5.0))
@@ -483,7 +514,11 @@ class BinanceClient:
                 order_id = o_data.get("orderId", o_data.get("id", "OK"))
                 return {"success": True, "data": o_data, "msg": f"Order Real {direction} berhasil dipasang (ID: {order_id})"}
             else:
-                return {"success": False, "msg": o_data.get("msg", str(o_data))}
+                code = o_data.get("code")
+                msg = o_data.get("msg", str(o_data))
+                if code == -31003 or "SAS authorization" in msg:
+                    return {"success": False, "msg": "Wajib aktifkan Secure Auto-Signing (SAS) di aplikasi Binance: [Dompet] > [Prediction] > [Settings]"}
+                return {"success": False, "msg": msg}
 
         except requests.exceptions.ConnectTimeout:
             return {"success": False, "msg": "Timeout koneksi saat kirim order (Periksa VPN/Proxy)"}

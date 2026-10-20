@@ -2,8 +2,10 @@
 
 Bot trading otomatis untuk pasar prediksi Binance menggunakan Python.
 
-## Fitur Utama (V2.7 Liquidity Guard & Safe Sniper Edition)
+## Fitur Utama (V2.8 Account Context & SAS Guard Edition)
 
+- **Official Bundle Specification Compliance:** Mengirimkan parameter wajib `accountType: "SPOT"` dan validasi `timeInForce: "FOK"` sesuai spesifikasi resmi Binance SAPI `place-order-bundle`.
+- **SAS (Secure Auto-Signing) Detector:** Mendeteksi status aktivasi Secure Auto-Signing (SAS) akun Binance Web3 secara otomatis saat bot mulai berjalan dan memandu pengguna.
 - **Order Book Liquidity Guard:** Mencegah taruhan pada probabilitas ekstrem (>92% / Payout < 1.08x) di mana buku pesanan Predict.fun/Binance kehabisan penjual, sehingga tidak terkena error *lack of liquidity*.
 - **Safe Sniper Execution Window:** Mengamankan jendela eksekusi taruhan di rentang 75 detik hingga 25 detik sebelum kedaluwarsa (`SNIPER_DEADLINE_SECONDS=25`), menghindari zona penutupan likuiditas menjelang akhir ronde.
 - **Dynamic 20% Slippage Protection:** Toleransi slippage 2000 bps (20%) untuk eksekusi cepat saat fluktuasi harga tanpa slippage rejection.

@@ -196,7 +196,22 @@ class BinanceAppPredictionBot:
                     source_str = getattr(self.client, "_active_funding_source", "WALLET")
                     print(f"✔ Akun Binance Terhubung! {msg}")
                     print(f"  • Saldo Aktif : \033[1;32m{real_bal:.2f} USDT\033[0m (Sumber: {source_str})")
-                    time.sleep(1.5)
+
+                    # Verifikasi izin SAS (Secure Auto-Signing)
+                    is_sas_active, _ = self.client.check_sas_authorization()
+                    if is_sas_active:
+                        print("  • Secure Auto-Signing (SAS) : \033[1;92mAKTIF\033[0m")
+                        time.sleep(1.5)
+                    else:
+                        print("  • Secure Auto-Signing (SAS) : \033[1;93mBELUM AKTIF\033[0m")
+                        print("\n\033[1;93m[INFO PENTING - AKTIFKAN SAS DI APLIKASI BINANCE]:\033[0m")
+                        print("  Agar bot diizinkan memasang order Web3 secara otomatis:")
+                        print("  1. Buka Aplikasi Binance di HP Anda.")
+                        print("  2. Buka menu [Dompet / Assets] ➔ [Prediction / Prediksi].")
+                        print("  3. Klik ikon Pengaturan (Gear) di pojok kanan atas.")
+                        print("  4. Aktifkan sakelar [Secure Auto-Signing (SAS)].")
+                        print("  Bot tetap berjalan dan siap mengeksekusi setelah SAS aktif.\n")
+                        time.sleep(3.0)
                 else:
                     print(f"\n\033[91m✘ Gagal terhubung ke Akun Binance:\033[0m {msg}")
                     print("\n\033[93m[Panduan Solusi]:\033[0m")
