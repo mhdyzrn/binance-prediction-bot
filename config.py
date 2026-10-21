@@ -112,3 +112,8 @@ REAL_HISTORY_FILE = "real_trade_history.json"             # Riwayat transaksi re
 HISTORY_FILE = REAL_HISTORY_FILE if not SIMULATION_MODE else SIM_HISTORY_FILE
 LOOP_INTERVAL_SECONDS = 1                             # Refresh rate interval dasar
 
+# Sistem Log Kecenderungan Pasar (Market Tendency & Telemetry)
+MARKET_TENDENCY_FILE = "market_tendency.json"             # Penyimpanan log kecenderungan tiap ronde
+TENDENCY_LOOKBACK_ROUNDS = 12                             # Jumlah ronde terakhir untuk analisis bias tren (12 ronde = 1 jam)
+MIN_STRONG_BIAS_DIFF = 20.0                               # Minimal selisih ($) jika mencoba order melawan bias pasar kuat
+

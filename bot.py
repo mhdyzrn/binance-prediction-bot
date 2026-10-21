@@ -72,6 +72,16 @@ class BinanceAppPredictionBot:
         candle_chg = m.get("candle_change", 0.0)
         c_badge = f"\033[1;92m▲ +${candle_chg:.2f}\033[0m" if candle_chg >= 0 else f"\033[1;91m▼ -${abs(candle_chg):.2f}\033[0m"
 
+        # Status Kecenderungan Pasar (Market Tendency & Bias)
+        tendency_bias = m.get("tendency_bias", "Memuat...")
+        tendency_stat = m.get("tendency_stat", "")
+        if "BULLISH" in tendency_bias.upper():
+            tend_badge = f"\033[1;92m▲ {tendency_bias}\033[0m"
+        elif "BEARISH" in tendency_bias.upper():
+            tend_badge = f"\033[1;91m▼ {tendency_bias}\033[0m"
+        else:
+            tend_badge = f"\033[1;36m◆ {tendency_bias}\033[0m"
+
         # Status Koneksi Jaringan
         is_online = m.get("is_online", True)
         stale_sec = m.get("stale_seconds", 0)
@@ -90,6 +100,7 @@ class BinanceAppPredictionBot:
             f"  Strike (5M Open): \033[1;37m${m['strike_price']:,.2f}\033[0m",
             f"  Harga Spot Live : {diff_colored}",
             f"  Indikator RSI   : {rsi_badge} | 1M: {c_badge}",
+            f"  Kecenderungan   : {tend_badge}" + (f" \033[90m({tendency_stat})\033[0m" if tendency_stat else ""),
             f"  Hitung Mundur   : \033[1;93m{m['countdown_str']}\033[0m \033[96m{spinner_char}\033[0m",
             " ──────────────────────────────────────────",
             "  ┌──────────────────┐  ┌──────────────────┐",

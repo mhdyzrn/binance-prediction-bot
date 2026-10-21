@@ -669,6 +669,14 @@ class PredictionEngine:
         self.cooldown_rounds_left = 0
         self.last_cooldown_loss_id = None
 
+        # Sistem Log Kecenderungan Pasar (Market Tendency & Telemetry)
+        self.tendency_file = getattr(config, "MARKET_TENDENCY_FILE", "market_tendency.json")
+        self.tendency_history: List[Dict[str, Any]] = self._load_tendency()
+        if not os.path.exists(self.tendency_file) and self.tendency_history:
+            self._save_tendency()
+        self.mid_round_snapshot: Dict[str, Any] = {}
+        self.last_recorded_round_id: Optional[str] = None
+
         # Riwayat transaksi tersimpan permanen di file terpisah (Real vs Simulasi)
         self.history_file = config.REAL_HISTORY_FILE if self.is_real else config.SIM_HISTORY_FILE
         self.history: List[Dict[str, Any]] = self._load_history()
@@ -1011,6 +1019,147 @@ class PredictionEngine:
         except Exception:
             pass
 
+    def _load_tendency(self) -> List[Dict[str, Any]]:
+        """Memuat riwayat kecenderungan pasar dari disk (atau inisialisasi dari settled history)"""
+        if os.path.exists(self.tendency_file):
+            try:
+                with open(self.tendency_file, "r") as f:
+                    data = json.load(f)
+                    if isinstance(data, list) and data:
+                        return data[-500:]
+            except Exception:
+                pass
+
+        # Seed awal dari riwayat settled Binance jika file masih kosong
+        seeded: List[Dict[str, Any]] = []
+        if self.is_real:
+            try:
+                settled = self.client.get_real_settled_history(limit=30)
+                for s in reversed(settled):
+                    outcome_raw = s.get("finalOutcome") or ("Up" if s.get("isWinner") and s.get("outcomeName") == "Up" else "Down")
+                    out_str = "Naik" if outcome_raw == "Up" else "Turun"
+                    end_ts = s.get("endDate", 0) / 1000.0
+                    seeded.append({
+                        "round_id": f"BTC-{datetime.fromtimestamp(end_ts).strftime('%H%M')}",
+                        "expiry_str": datetime.fromtimestamp(end_ts).strftime("%Y-%m-%d %H:%M:%S"),
+                        "outcome": out_str,
+                        "strike_price": None,
+                        "final_spot": None,
+                        "diff": None,
+                        "bot_action": "ENTER" if s.get("positionId") else "OBSERVE",
+                        "bot_direction": "Naik" if s.get("outcomeName") == "Up" else "Turun",
+                        "bot_won": s.get("isWinner"),
+                        "recorded_at": end_ts
+                    })
+            except Exception:
+                pass
+        return seeded
+
+    def _save_tendency(self):
+        """Menyimpan log kecenderungan pasar ke disk"""
+        try:
+            with open(self.tendency_file, "w") as f:
+                json.dump(self.tendency_history[-500:], f, indent=2)
+        except Exception:
+            pass
+
+    def record_round_tendency(self, round_info: Dict[str, Any], final_spot: float):
+        """Merekam telemetri dan kecenderungan pasar setiap penutupan ronde 5 menit"""
+        round_id = round_info.get("round_id")
+        if not round_id or round_id == self.last_recorded_round_id:
+            return
+
+        self.last_recorded_round_id = round_id
+        strike = round_info.get("strike_price") or final_spot
+        diff = round(final_spot - strike, 2)
+        outcome = "Naik" if final_spot >= strike else "Turun"
+
+        # Cek apakah bot ada posisi di ronde ini
+        active_pos = round_info.get("placed_pos") or (self.active_positions[0] if self.active_positions else None)
+        bot_act = "ENTER" if active_pos else "OBSERVE"
+        bot_dir = active_pos.get("direction") if active_pos else None
+        bot_won = (bot_dir == outcome) if bot_dir else None
+
+        snap = self.mid_round_snapshot or {}
+
+        record = {
+            "round_id": round_id,
+            "expiry_str": round_info.get("expiry_str", ""),
+            "strike_price": round(strike, 2),
+            "final_spot": round(final_spot, 2),
+            "diff": diff,
+            "outcome": outcome,
+            "mid_rsi": snap.get("rsi", self.cached_rsi),
+            "mid_candle_color": snap.get("candle_color", self.cached_candle_color),
+            "mid_candle_change": snap.get("candle_change", self.cached_candle_change),
+            "payout_naik_at_mid": snap.get("payout_naik"),
+            "payout_turun_at_mid": snap.get("payout_turun"),
+            "bot_action": bot_act,
+            "bot_direction": bot_dir,
+            "bot_won": bot_won,
+            "recorded_at": time.time()
+        }
+
+        self.tendency_history.append(record)
+        self.mid_round_snapshot = {}
+        self._save_tendency()
+
+    def get_market_tendency_summary(self, lookback: int = None) -> Dict[str, Any]:
+        """Menghitung ringkasan bias & kecenderungan pasar berdasarkan N ronde terakhir"""
+        if lookback is None:
+            lookback = getattr(config, "TENDENCY_LOOKBACK_ROUNDS", 12)
+
+        recent = self.tendency_history[-lookback:] if self.tendency_history else []
+        total = len(recent)
+        if total == 0:
+            return {
+                "lookback_rounds": 0,
+                "naik_count": 0,
+                "turun_count": 0,
+                "naik_pct": 50.0,
+                "turun_pct": 50.0,
+                "bias": "NETRAL / SIDEWAYS",
+                "bias_short": "NETRAL",
+                "avg_abs_diff": 0.0,
+                "trend_strength": "LOW"
+            }
+
+        naik_cnt = sum(1 for r in recent if r.get("outcome") == "Naik")
+        turun_cnt = sum(1 for r in recent if r.get("outcome") == "Turun")
+        naik_pct = round((naik_cnt / total) * 100, 1)
+        turun_pct = round((turun_cnt / total) * 100, 1)
+
+        diffs = [abs(r.get("diff", 0.0)) for r in recent if r.get("diff") is not None]
+        avg_diff = round(sum(diffs) / len(diffs), 2) if diffs else 0.0
+
+        if naik_pct >= 66.7:
+            bias = "BULLISH (KUAT)"
+            strength = "HIGH"
+        elif naik_pct >= 58.0:
+            bias = "BULLISH (MODERAT)"
+            strength = "MEDIUM"
+        elif turun_pct >= 66.7:
+            bias = "BEARISH (KUAT)"
+            strength = "HIGH"
+        elif turun_pct >= 58.0:
+            bias = "BEARISH (MODERAT)"
+            strength = "MEDIUM"
+        else:
+            bias = "NETRAL / SIDEWAYS"
+            strength = "LOW"
+
+        return {
+            "lookback_rounds": total,
+            "naik_count": naik_cnt,
+            "turun_count": turun_cnt,
+            "naik_pct": naik_pct,
+            "turun_pct": turun_pct,
+            "bias": bias,
+            "bias_short": f"{bias.split()[0]} ({int(max(naik_pct, turun_pct))}%)",
+            "avg_abs_diff": avg_diff,
+            "trend_strength": strength
+        }
+
     def get_balance(self, force_refresh: bool = False) -> float:
         """Mengambil saldo (Riil jika mode LIVE dengan caching 30s & safe retain, Virtual jika mode SIMULASI)"""
         if self.is_real:
@@ -1047,6 +1196,7 @@ class PredictionEngine:
         # Jika masuk ronde 5 menit baru
         if not self.current_round or self.current_round["expiry_timestamp"] != expiry_timestamp:
             if self.current_round:
+                self.record_round_tendency(self.current_round, self.live_btc_price)
                 self._resolve_round(self.live_btc_price)
                 if self.cooldown_rounds_left > 0:
                     self.cooldown_rounds_left -= 1
@@ -1139,6 +1289,22 @@ class PredictionEngine:
         win_rate = (wins / total_trades * 100) if total_trades > 0 else 0.0
         net_pnl = sum(h.get("profit", 0.0) for h in active_hist)
 
+        # Capture mid-round snapshot untuk analisis telemetri (sisa 45s s.d 150s)
+        if 45 <= seconds_left <= 150:
+            c_round_id = self.current_round.get("round_id") if self.current_round else None
+            if not self.mid_round_snapshot or self.mid_round_snapshot.get("round_id") != c_round_id:
+                self.mid_round_snapshot = {
+                    "round_id": c_round_id,
+                    "rsi": self.cached_rsi,
+                    "candle_color": self.cached_candle_color,
+                    "candle_change": self.cached_candle_change,
+                    "payout_naik": payout_naik_mult,
+                    "payout_turun": payout_turun_mult,
+                    "snapshot_at": now
+                }
+
+        tendency_summary = self.get_market_tendency_summary()
+
         market_name = f"{config.TARGET_ASSET} Naik atau Turun dalam {config.ROUND_MINUTES} Menit?"
         return {
             "title": market_name,
@@ -1166,6 +1332,9 @@ class PredictionEngine:
             "rsi": self.cached_rsi,
             "candle_color": self.cached_candle_color,
             "candle_change": self.cached_candle_change,
+            "tendency_bias": tendency_summary["bias"],
+            "tendency_stat": f"{tendency_summary['naik_count']} Naik / {tendency_summary['turun_count']} Turun ({tendency_summary['lookback_rounds']} Ronde)",
+            "tendency_summary": tendency_summary,
             "in_cooldown": (self.cooldown_rounds_left > 0),
             "cooldown_rounds_left": self.cooldown_rounds_left,
             "consecutive_losses": self.consecutive_losses,

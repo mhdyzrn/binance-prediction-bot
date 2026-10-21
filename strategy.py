@@ -61,6 +61,9 @@ class PredictionStrategy:
         rsi_str = f"{rsi:.1f}" if rsi is not None else "-"
         candle_color = market.get("candle_color", "NEUTRAL")
         candle_change = market.get("candle_change", 0.0)
+        tendency_bias = market.get("tendency_bias", "")
+        tendency_stat = market.get("tendency_stat", "")
+        min_strong_diff = getattr(config, "MIN_STRONG_BIAS_DIFF", 20.0)
 
         # Kasus A: Spot BTC unggul di atas target strike (Potensi NAIK)
         if diff_val >= self.min_diff:
@@ -104,6 +107,14 @@ class PredictionStrategy:
                     "action": "OBSERVE",
                     "direction": None,
                     "reason": f"Candle 1m koreksi turun tajam (-${abs(candle_change):.1f}) - Tahan NAIK"
+                }
+
+            # Filter 6: Trend Alignment (Cegah beli NAIK dengan selisih tipis saat bias pasar BEARISH KUAT)
+            if "BEARISH (KUAT)" in tendency_bias and diff_val < min_strong_diff:
+                return {
+                    "action": "OBSERVE",
+                    "direction": None,
+                    "reason": f"Bias pasar BEARISH KUAT ({tendency_stat}) - Tahan NAIK (Butuh selisih >${min_strong_diff:.0f})"
                 }
 
             return {
@@ -155,6 +166,14 @@ class PredictionStrategy:
                     "action": "OBSERVE",
                     "direction": None,
                     "reason": f"Candle 1m pantulan naik tajam (+${candle_change:.1f}) - Tahan TURUN"
+                }
+
+            # Filter 6: Trend Alignment (Cegah beli TURUN dengan selisih tipis saat bias pasar BULLISH KUAT)
+            if "BULLISH (KUAT)" in tendency_bias and abs(diff_val) < min_strong_diff:
+                return {
+                    "action": "OBSERVE",
+                    "direction": None,
+                    "reason": f"Bias pasar BULLISH KUAT ({tendency_stat}) - Tahan TURUN (Butuh selisih >${min_strong_diff:.0f})"
                 }
 
             return {

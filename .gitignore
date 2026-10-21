@@ -47,6 +47,7 @@ trade_history.json
 real_trade_history.json
 *trade_history.json
 sim_balance.json
+market_tendency.json
 
 # IDE / Editor configuration
 .idea/
