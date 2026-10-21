@@ -85,17 +85,20 @@ def calculate_compound_bet(balance: float) -> tuple[float, str]:
     return min(BET_AMOUNT_USDT, MAX_COMPOUND_BET), "Tier 1 ($10+)"
 
 
-# Parameter Strategi Momentum Trend-Rider (BTC 5 Menit)
-# Eksekusi dilakukan di jendela momentum awal-tengah ronde (02:30 s.d 00:45) untuk payout optimal
-SNIPER_TRIGGER_SECONDS = int(os.getenv("SNIPER_TRIGGER_SECONDS", "150"))   # Jendela momentum mulai: sisa 2 menit 30 detik (02:30)
-SNIPER_DEADLINE_SECONDS = int(os.getenv("SNIPER_DEADLINE_SECONDS", "45"))  # Batas akhir eksekusi: sisa 45 detik (00:45) sebelum payout menyusut
-SNIPER_MIN_DIFF = float(os.getenv("SNIPER_MIN_DIFF", "15.0"))             # Minimal selisih harga BTC ($15) untuk konfirmasi awal tren
-MIN_PAYOUT_MULTIPLIER = float(os.getenv("MIN_PAYOUT_MULTIPLIER", "1.25")) # Minimal payout 1.25x (profit bersih minimal +$0.25 per modal $1.00)
-MAX_PAYOUT_MULTIPLIER = float(os.getenv("MAX_PAYOUT_MULTIPLIER", "2.20")) # Maksimal payout 2.20x (cegah taruhan probabilitas terlalu kecil / spekulatif)
+# Parameter Strategi Momentum RSI & Chart Synchronizer (BTC 5 Menit)
+# Filter payout dinonaktifkan (default False); Eksekusi langsung saat RSI & Chart sinkron
+ENABLE_PAYOUT_FILTER = os.getenv("ENABLE_PAYOUT_FILTER", "False").lower() == "true"  # Filter Payout Dimatikan (Default: False)
+SNIPER_TRIGGER_SECONDS = int(os.getenv("SNIPER_TRIGGER_SECONDS", "210"))   # Jendela evaluasi mulai: sisa 3 menit 30 detik (03:30)
+SNIPER_DEADLINE_SECONDS = int(os.getenv("SNIPER_DEADLINE_SECONDS", "15"))  # Batas akhir eksekusi: sisa 15 detik (00:15)
+SNIPER_MIN_DIFF = float(os.getenv("SNIPER_MIN_DIFF", "5.0"))               # Minimal selisih harga BTC ($5) untuk konfirmasi arah
+MIN_PAYOUT_MULTIPLIER = float(os.getenv("MIN_PAYOUT_MULTIPLIER", "1.25")) # (Hanya aktif jika ENABLE_PAYOUT_FILTER=True)
+MAX_PAYOUT_MULTIPLIER = float(os.getenv("MAX_PAYOUT_MULTIPLIER", "2.20")) # (Hanya aktif jika ENABLE_PAYOUT_FILTER=True)
 SLIPPAGE_BPS = int(os.getenv("SLIPPAGE_BPS", "2000"))                     # Toleransi slippage: default 20% (2000 basis points)
 
 # Parameter Indikator RSI & Momentum (1M timeframe)
 RSI_PERIOD = 14                                       # Periode RSI 14
+RSI_BULLISH_THRESHOLD = float(os.getenv("RSI_BULLISH_THRESHOLD", "48.0"))  # Ambang batas RSI Bullish (>= 48)
+RSI_BEARISH_THRESHOLD = float(os.getenv("RSI_BEARISH_THRESHOLD", "52.0"))  # Ambang batas RSI Bearish (<= 52)
 RSI_MIN_NAIK = 48.0                                   # Minimal RSI 48 untuk konfirmasi momentum bullish Naik
 RSI_OVERBOUGHT = 75.0                                 # Tahan sinyal NAIK jika RSI > 75 (rawan jenuh beli)
 RSI_MAX_TURUN = 52.0                                  # Maksimal RSI 52 untuk konfirmasi momentum bearish Turun

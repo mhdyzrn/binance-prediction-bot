@@ -257,10 +257,24 @@ class BinanceAppPredictionBot:
                 else:
                     print(f"\n\033[91m✘ Gagal terhubung ke Akun Binance:\033[0m {msg}")
                     print("\n\033[93m[Panduan Solusi]:\033[0m")
-                    print("  1. Di Indonesia, domain `api.binance.com` diblokir oleh Kominfo/ISP.")
-                    print("     Aktifkan VPN di HP Anda (misalnya Cloudflare 1.1.1.1 WARP atau Intra).")
-                    print("  2. Atau jalankan Mode Simulasi (Paper Trading) dengan mengubah `.env`:")
-                    print("     SIMULATION_MODE=True\n")
+                    if "-2015" in msg:
+                        print("  \033[1;93mPenyebab: Kode -2015 (Invalid API-key, IP, or permissions for action)\033[0m")
+                        print("  Koneksi internet Anda ke Binance normal, namun API menolak permintaan:")
+                        print("  1. Pembatasan IP (IP Whitelist) di Binance:")
+                        print("     Jika API Key mengaktifkan 'Restrict access to trusted IPs only',")
+                        print("     daftarkan IP publik perangkat ini ke whitelist di Binance API Management.")
+                        print("  2. Validitas API Key & Secret:")
+                        print("     Pastikan API Key dan Secret di .env tidak salah ketik dan belum expired")
+                        print("     (API Key tanpa IP Whitelist otomatis kadaluarsa setelah 90 hari).")
+                        print("  3. Izin Akses (Permissions):")
+                        print("     Pastikan izin 'Enable Reading' aktif di Binance API Management.")
+                        print("  4. Atau jalankan Mode Simulasi (Paper Trading) dengan mengubah `.env`:")
+                        print("     SIMULATION_MODE=True\n")
+                    else:
+                        print("  1. Di Indonesia, domain `api.binance.com` terkadang diblokir oleh Kominfo/ISP.")
+                        print("     Aktifkan VPN di HP Anda (misalnya Cloudflare 1.1.1.1 WARP atau Intra).")
+                        print("  2. Atau jalankan Mode Simulasi (Paper Trading) dengan mengubah `.env`:")
+                        print("     SIMULATION_MODE=True\n")
                     sys.exit(1)
         else:
             bal = self.engine.get_balance()

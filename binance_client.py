@@ -684,7 +684,8 @@ class PredictionEngine:
 
         # Riwayat transaksi tersimpan permanen di file terpisah (Real vs Simulasi)
         self.history_file = config.REAL_HISTORY_FILE if self.is_real else config.SIM_HISTORY_FILE
-        self.history: List[Dict[str, Any]] = self._load_history()
+        self.history: List[Dict[str, Any]] = []
+        self.history = self._load_history()
 
         # Evaluasi kekalahan berturut-turut dari riwayat
         loss_cnt = 0
@@ -925,33 +926,41 @@ class PredictionEngine:
 
     def _load_history(self) -> List[Dict[str, Any]]:
         """Memuat riwayat transaksi dari disk. Pada mode Real, sinkronkan langsung dengan Binance SAPI"""
-        if self.is_real:
-            synced = self.sync_real_history(save=True)
-            if synced:
-                return synced
-
+        disk_data = []
         if os.path.exists(self.history_file):
             try:
                 with open(self.history_file, "r") as f:
                     data = json.load(f)
                     if isinstance(data, list):
-                        return [d for d in data if d.get("is_real", False) == self.is_real]
+                        disk_data = [d for d in data if d.get("is_real", False) == self.is_real]
             except Exception:
                 pass
-        return []
+
+        self.history = disk_data
+
+        if self.is_real:
+            try:
+                synced = self.sync_real_history(save=True)
+                if synced:
+                    return synced
+            except Exception:
+                pass
+
+        return disk_data
 
     def sync_real_history(self, save: bool = True) -> List[Dict[str, Any]]:
         """
         Mensinkronisasikan riwayat transaksi riil langsung dari Binance SAPI Web3 Prediction.
         Menjamin status Menang/Kalah (Win/Loss) dan Net PnL 100% identik dengan aplikasi Binance.
         """
+        current_history = getattr(self, "history", [])
         if not self.is_real:
-            return self.history
+            return current_history
 
         try:
             positions = self.client.get_real_settled_history(limit=50)
             if not positions:
-                return self.history
+                return current_history
 
             synced: List[Dict[str, Any]] = []
             for p in positions:
@@ -985,6 +994,18 @@ class PredictionEngine:
                 })
 
             synced.reverse()  # Urutan kronologis (terlama ke terbaru)
+
+            # Gabungkan dengan riwayat lokal yang sudah ada
+            if current_history:
+                existing_map = {h["position_id"]: h for h in current_history if h.get("position_id")}
+                for s in synced:
+                    pid = s.get("position_id")
+                    if pid:
+                        existing_map[pid] = s
+                merged = list(existing_map.values())
+                merged.sort(key=lambda x: x.get("end_timestamp", 0))
+                synced = merged
+
             self.history = synced
 
             # Evaluasi kekalahan berturut-turut untuk proteksi cooldown
@@ -1019,13 +1040,14 @@ class PredictionEngine:
                 self._save_history()
             return synced
         except Exception:
-            return self.history
+            return getattr(self, "history", [])
 
     def _save_history(self):
         """Menyimpan riwayat transaksi ke disk"""
         try:
+            hist = getattr(self, "history", [])
             with open(self.history_file, "w") as f:
-                json.dump(self.history[-200:], f, indent=2)
+                json.dump(hist[-200:], f, indent=2)
         except Exception:
             pass
 
