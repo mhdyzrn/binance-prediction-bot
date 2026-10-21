@@ -58,7 +58,7 @@ class BinanceAppPredictionBot:
         prob_naik_str = f"{m['prob_naik']}%"
         prob_turun_str = f"{m['prob_turun']}%"
 
-        # Status RSI-14
+        # Status Indikator RSI & Micro-Momentum Candle 1M
         rsi = m.get("rsi")
         if rsi is None:
             rsi_badge = "\033[90mMemuat...\033[0m"
@@ -68,6 +68,9 @@ class BinanceAppPredictionBot:
             rsi_badge = f"\033[1;92m{rsi:.1f} (Oversold)\033[0m"
         else:
             rsi_badge = f"\033[1;36m{rsi:.1f} (Netral)\033[0m"
+
+        candle_chg = m.get("candle_change", 0.0)
+        c_badge = f"\033[1;92m▲ +${candle_chg:.2f}\033[0m" if candle_chg >= 0 else f"\033[1;91m▼ -${abs(candle_chg):.2f}\033[0m"
 
         # Status Koneksi Jaringan
         is_online = m.get("is_online", True)
@@ -86,7 +89,7 @@ class BinanceAppPredictionBot:
             f"  Kedaluwarsa     : \033[1m{m['expiry_str']}\033[0m",
             f"  Strike (5M Open): \033[1;37m${m['strike_price']:,.2f}\033[0m",
             f"  Harga Spot Live : {diff_colored}",
-            f"  Indikator RSI   : {rsi_badge}",
+            f"  Indikator RSI   : {rsi_badge} | 1M: {c_badge}",
             f"  Hitung Mundur   : \033[1;93m{m['countdown_str']}\033[0m \033[96m{spinner_char}\033[0m",
             " ──────────────────────────────────────────",
             "  ┌──────────────────┐  ┌──────────────────┐",

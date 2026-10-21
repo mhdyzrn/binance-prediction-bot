@@ -662,6 +662,8 @@ class PredictionEngine:
         
         # State RSI & Proteksi Cooldown
         self.cached_rsi: Optional[float] = None
+        self.cached_candle_color: str = "NEUTRAL"
+        self.cached_candle_change: float = 0.0
         self.last_rsi_update = 0.0
         self.consecutive_losses = 0
         self.cooldown_rounds_left = 0
@@ -739,12 +741,33 @@ class PredictionEngine:
                 if now - self.last_price_timestamp > 5:
                     self.is_online = False
 
-            # 2. Update RSI secara berkala (tiap 3 detik)
+            # 2. Update RSI & Candle Micro-Momentum secara berkala (tiap 3 detik)
             if now - self.last_rsi_update >= 3.0:
                 try:
-                    val_rsi = self.client.calculate_rsi(config.TARGET_SYMBOL, config.RSI_PERIOD)
-                    if val_rsi is not None:
-                        self.cached_rsi = val_rsi
+                    klines = self.client.get_klines(config.TARGET_SYMBOL, interval="1m", limit=config.RSI_PERIOD + 10)
+                    if klines and len(klines) >= config.RSI_PERIOD + 1:
+                        closes = [float(k[4]) for k in klines]
+                        gains = []
+                        losses = []
+                        for i in range(1, len(closes)):
+                            diff = closes[i] - closes[i - 1]
+                            gains.append(max(0.0, diff))
+                            losses.append(max(0.0, -diff))
+                        period = config.RSI_PERIOD
+                        avg_gain = sum(gains[-period:]) / period
+                        avg_loss = sum(losses[-period:]) / period
+                        if avg_loss == 0:
+                            self.cached_rsi = 100.0
+                        else:
+                            rs = avg_gain / avg_loss
+                            self.cached_rsi = round(100.0 - (100.0 / (1.0 + rs)), 2)
+
+                        # Micro-momentum candle 1M terkini
+                        last_k = klines[-1]
+                        k_open = float(last_k[1])
+                        k_close = float(last_k[4])
+                        self.cached_candle_change = round(k_close - k_open, 2)
+                        self.cached_candle_color = "GREEN" if k_close >= k_open else "RED"
                     self.last_rsi_update = now
                 except Exception:
                     pass
@@ -1141,6 +1164,8 @@ class PredictionEngine:
             "is_online": self.is_online,
             "stale_seconds": stale_seconds,
             "rsi": self.cached_rsi,
+            "candle_color": self.cached_candle_color,
+            "candle_change": self.cached_candle_change,
             "in_cooldown": (self.cooldown_rounds_left > 0),
             "cooldown_rounds_left": self.cooldown_rounds_left,
             "consecutive_losses": self.consecutive_losses,

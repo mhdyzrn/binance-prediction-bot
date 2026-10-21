@@ -85,18 +85,21 @@ def calculate_compound_bet(balance: float) -> tuple[float, str]:
     return min(BET_AMOUNT_USDT, MAX_COMPOUND_BET), "Tier 1 ($10+)"
 
 
-# Parameter Strategi Late-Sniper (BTC 5 Menit)
-# Eksekusi dilakukan di jendela sniper aman sebelum kedaluwarsa (Sweet Spot 50s - 20s)
-SNIPER_TRIGGER_SECONDS = int(os.getenv("SNIPER_TRIGGER_SECONDS", "50"))    # Jendela eksekusi mulai: sisa 50 detik (00:50)
-SNIPER_DEADLINE_SECONDS = int(os.getenv("SNIPER_DEADLINE_SECONDS", "20"))  # Batas akhir aman: sisa 20 detik (00:20)
-SNIPER_MIN_DIFF = float(os.getenv("SNIPER_MIN_DIFF", "15.0"))              # Minimal selisih harga BTC ($15) untuk menghindari noise
-MIN_PAYOUT_MULTIPLIER = float(os.getenv("MIN_PAYOUT_MULTIPLIER", "1.08"))  # Minimal payout 1.08x (menghindari probabilitas >92% yang kering likuiditas)
-SLIPPAGE_BPS = int(os.getenv("SLIPPAGE_BPS", "2000"))                      # Toleransi slippage: default 20% (2000 basis points)
+# Parameter Strategi Momentum Trend-Rider (BTC 5 Menit)
+# Eksekusi dilakukan di jendela momentum awal-tengah ronde (02:30 s.d 00:45) untuk payout optimal
+SNIPER_TRIGGER_SECONDS = int(os.getenv("SNIPER_TRIGGER_SECONDS", "150"))   # Jendela momentum mulai: sisa 2 menit 30 detik (02:30)
+SNIPER_DEADLINE_SECONDS = int(os.getenv("SNIPER_DEADLINE_SECONDS", "45"))  # Batas akhir eksekusi: sisa 45 detik (00:45) sebelum payout menyusut
+SNIPER_MIN_DIFF = float(os.getenv("SNIPER_MIN_DIFF", "15.0"))             # Minimal selisih harga BTC ($15) untuk konfirmasi awal tren
+MIN_PAYOUT_MULTIPLIER = float(os.getenv("MIN_PAYOUT_MULTIPLIER", "1.25")) # Minimal payout 1.25x (profit bersih minimal +$0.25 per modal $1.00)
+MAX_PAYOUT_MULTIPLIER = float(os.getenv("MAX_PAYOUT_MULTIPLIER", "2.20")) # Maksimal payout 2.20x (cegah taruhan probabilitas terlalu kecil / spekulatif)
+SLIPPAGE_BPS = int(os.getenv("SLIPPAGE_BPS", "2000"))                     # Toleransi slippage: default 20% (2000 basis points)
 
-# Parameter Indikator RSI (1M timeframe)
+# Parameter Indikator RSI & Momentum (1M timeframe)
 RSI_PERIOD = 14                                       # Periode RSI 14
-RSI_OVERBOUGHT = 78.0                                 # Tahan sinyal NAIK jika RSI > 78 (rawan pembalikan turun)
-RSI_OVERSOLD = 22.0                                   # Tahan sinyal TURUN jika RSI < 22 (rawan pantulan naik)
+RSI_MIN_NAIK = 48.0                                   # Minimal RSI 48 untuk konfirmasi momentum bullish Naik
+RSI_OVERBOUGHT = 75.0                                 # Tahan sinyal NAIK jika RSI > 75 (rawan jenuh beli)
+RSI_MAX_TURUN = 52.0                                  # Maksimal RSI 52 untuk konfirmasi momentum bearish Turun
+RSI_OVERSOLD = 25.0                                   # Tahan sinyal TURUN jika RSI < 25 (rawan jenuh jual)
 
 # Proteksi Kekalahan Beruntun (Cooldown untuk pengujian 24 Jam)
 # Catatan: Daily Stop-Loss dan Daily Take-Profit dinonaktifkan sesuai permintaan pengujian 24 jam
