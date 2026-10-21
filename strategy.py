@@ -1,164 +1,266 @@
-from typing import Dict, Any
+from typing import List, Dict, Any, Optional
 import config
+from indicators import IndicatorCalculator
+from liquidity_sweep import LiquiditySweepDetector
 
-class PredictionStrategy:
+class QuantitativeStrategy:
     """
-    Strategi Momentum RSI & Chart Synchronizer khusus pasar BTC 5 Menit:
-    - Filter Payout: Dinonaktifkan (ENABLE_PAYOUT_FILTER = False).
-    - Sinyal NAIK: Jika RSI Bullish DAN Chart Bullish -> LANGSUNG ENTRY NAIK.
-    - Sinyal TURUN: Jika RSI Bearish DAN Chart Bearish -> LANGSUNG ENTRY TURUN.
-    - Jendela Eksekusi: Sisa waktu 03:30 s.d 00:15 ronde berjalan.
+    Strategi Prediksi Multi-Indikator Kuantitatif untuk BTCUSDT (1m -> 5m Horizon).
+    Menggabungkan:
+    1. Trend Filter: EMA 20 & EMA 50
+    2. Momentum Filter: RSI 14
+    3. Liquidity Sweep: Swing High/Low 20
+    4. Volume Filter: Volume SMA 20
+    5. Volatility Filter: ATR 14
+    6. Extreme Candle Filter & Spread Filter
     """
-    def __init__(self):
-        self.trigger_sec = getattr(config, "SNIPER_TRIGGER_SECONDS", 210)
-        self.deadline_sec = getattr(config, "SNIPER_DEADLINE_SECONDS", 15)
-        self.min_diff = getattr(config, "SNIPER_MIN_DIFF", 5.0)
-        self.enable_payout_filter = getattr(config, "ENABLE_PAYOUT_FILTER", False)
-        self.min_payout = getattr(config, "MIN_PAYOUT_MULTIPLIER", 1.25)
-        self.max_payout = getattr(config, "MAX_PAYOUT_MULTIPLIER", 2.20)
-        self.rsi_bull_thresh = getattr(config, "RSI_BULLISH_THRESHOLD", 48.0)
-        self.rsi_bear_thresh = getattr(config, "RSI_BEARISH_THRESHOLD", 52.0)
 
-    def evaluate_signal(self, market: Dict[str, Any]) -> Dict[str, Any]:
-        seconds_left = market["seconds_left"]
-        diff_val = market["diff_val"]
+    def __init__(self, sweep_detector: Optional[LiquiditySweepDetector] = None):
+        self.sweep_detector = sweep_detector or LiquiditySweepDetector(lookback_period=config.SWING_LOOKBACK)
 
-        # Safeguard 1: Proteksi Cooldown setelah kekalahan beruntun
-        if market.get("in_cooldown", False):
-            rounds_left = market.get("cooldown_rounds_left", 1)
+    def evaluate_market(
+        self,
+        closed_candles: List[Dict[str, Any]],
+        current_spread: float = 0.5,
+        in_cooldown: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Mengevaluasi seluruh kondisi pasar secara kuantitatif berdasarkan candle yang sudah selesai/tertutup.
+
+        Args:
+            closed_candles: List candle 1m yang sudah selesai/ditutup (minimal 55 candle untuk EMA 50).
+            current_spread: Spread bid-ask saat ini dalam USDT.
+            in_cooldown: Apakah bot sedang dalam masa jeda posisi 5m aktif.
+
+        Returns:
+            Dict hasil evaluasi lengkap dan alasan teknikal.
+        """
+        min_required_candles = max(config.EMA_SLOW_PERIOD + 5, config.SWING_LOOKBACK + 5)
+        if not closed_candles or len(closed_candles) < min_required_candles:
             return {
-                "action": "OBSERVE",
+                "prediction": "NEUTRAL",
                 "direction": None,
-                "reason": f"Proteksi Cooldown aktif ({rounds_left} ronde jeda setelah {config.MAX_CONSECUTIVE_LOSS}x loss)"
+                "score": 0.0,
+                "reason": f"Data candle belum mencukupi (diperlukan minimal {min_required_candles} candle)",
+                "metrics": {}
             }
 
-        # Safeguard 2: Jika koneksi terputus atau data harga basi (> 5 detik)
-        if not market.get("is_online", True) or market.get("stale_seconds", 0) > 5:
-            stale = market.get("stale_seconds", 0)
+        # -------------------------------------------------------------
+        # 0. SAFEGUARD: COOLDOWN & SPREAD
+        # -------------------------------------------------------------
+        if in_cooldown:
             return {
-                "action": "OBSERVE",
+                "prediction": "NEUTRAL",
                 "direction": None,
-                "reason": f"Koneksi terputus! Order ditahan ({stale}s)"
+                "score": 0.0,
+                "reason": "Sedang dalam masa Cooldown (menunggu evaluasi posisi 5m selesai)",
+                "metrics": {}
             }
 
-        # Fase 1: Mengamati (Belum masuk jendela evaluasi ronde)
-        if seconds_left > self.trigger_sec:
-            mins_wait = (seconds_left - self.trigger_sec) // 60
-            secs_wait = (seconds_left - self.trigger_sec) % 60
+        if current_spread > config.MAX_SPREAD_USDT:
             return {
-                "action": "OBSERVE",
+                "prediction": "NEUTRAL",
                 "direction": None,
-                "reason": f"Mengamati tren awal (Evaluasi aktif dalam {mins_wait:02d}:{secs_wait:02d})"
+                "score": 0.0,
+                "reason": f"Spread melebar (${current_spread:.2f} > batas ${config.MAX_SPREAD_USDT:.2f})",
+                "metrics": {"spread": current_spread}
             }
 
-        # Fase 3: Batas akhir jendela ronde (< 15 detik)
-        if seconds_left < self.deadline_sec:
+        # Ambil deret harga candle yang sudah ditutup
+        closes = [float(c["close"]) for c in closed_candles]
+        highs = [float(c["high"]) for c in closed_candles]
+        lows = [float(c["low"]) for c in closed_candles]
+        volumes = [float(c["volume"]) for c in closed_candles]
+        signal_candle = closed_candles[-1]
+        last_close = closes[-1]
+
+        # -------------------------------------------------------------
+        # 1. PERHITUNGAN INDIKATOR KUANTITATIF
+        # -------------------------------------------------------------
+        ema20 = IndicatorCalculator.calculate_ema(closes, config.EMA_FAST_PERIOD)
+        ema50 = IndicatorCalculator.calculate_ema(closes, config.EMA_SLOW_PERIOD)
+        rsi14 = IndicatorCalculator.calculate_rsi(closes, config.RSI_PERIOD)
+        atr14 = IndicatorCalculator.calculate_atr(highs, lows, closes, config.ATR_PERIOD)
+        vol_sma20 = IndicatorCalculator.calculate_volume_sma(volumes[:-1], config.VOLUME_LOOKBACK)
+        signal_vol = volumes[-1]
+        c_metrics = IndicatorCalculator.calculate_candle_metrics(signal_candle)
+        sweep_res = self.sweep_detector.detect_sweep(closed_candles)
+
+        metrics = {
+            "close": last_close,
+            "ema20": ema20,
+            "ema50": ema50,
+            "rsi14": rsi14,
+            "atr14": atr14,
+            "signal_vol": signal_vol,
+            "vol_sma20": vol_sma20,
+            "candle_body": c_metrics["body"],
+            "sweep_type": sweep_res["type"],
+            "sweep_detected": sweep_res["detected"],
+            "spread": current_spread
+        }
+
+        # Validasi ketersediaan indikator
+        if ema20 is None or ema50 is None or rsi14 is None or atr14 is None:
             return {
-                "action": "EXPIRED_SOON",
+                "prediction": "NEUTRAL",
                 "direction": None,
-                "reason": f"Sisa waktu ronde habis (< {self.deadline_sec}s)"
+                "score": 0.0,
+                "reason": "Gagal menghitung nilai indikator (riwayat tidak cukup)",
+                "metrics": metrics
             }
 
-        # Fase 2: Evaluasi Sinkronisasi RSI & Chart
-        rsi = market.get("rsi")
-        rsi_str = f"{rsi:.1f}" if rsi is not None else "-"
-        candle_color = market.get("candle_color", "NEUTRAL")
-        candle_change = market.get("candle_change", 0.0)
-        ema_trend = market.get("ema_trend", "NETRAL")
-        payout_naik = market.get("payout_naik", 1.0)
-        payout_turun = market.get("payout_turun", 1.0)
-
-        # Evaluasi Status RSI:
-        # Bullish jika RSI >= 48 (atau >= 50)
-        # Bearish jika RSI <= 52 (atau <= 50)
-        rsi_bullish = (rsi is not None and rsi >= self.rsi_bull_thresh)
-        rsi_bearish = (rsi is not None and rsi <= self.rsi_bear_thresh)
-
-        # Evaluasi Status Chart:
-        # Chart Bullish: Spot unggul di atas Strike (>= min_diff) DAN didukung candle hijau atau EMA bullish atau leading kuat
-        chart_bullish = (diff_val >= self.min_diff) and (candle_color == "GREEN" or ema_trend == "BULLISH" or diff_val >= 15.0)
-
-        # Chart Bearish: Spot tertekan di bawah Strike (<= -min_diff) DAN didukung candle merah atau EMA bearish atau leading kuat
-        chart_bearish = (diff_val <= -self.min_diff) and (candle_color == "RED" or ema_trend == "BEARISH" or abs(diff_val) >= 15.0)
-
-        # ----------------------------------------------------
-        # KASUS 1: RSI BULLISH & CHART BULLISH -> LANGSUNG ENTRY NAIK
-        # ----------------------------------------------------
-        if rsi_bullish and chart_bullish:
-            # Filter Payout (Hanya jika diaktifkan manual)
-            if self.enable_payout_filter:
-                if payout_naik < self.min_payout:
-                    return {
-                        "action": "OBSERVE",
-                        "direction": None,
-                        "reason": f"Payout NAIK rendah ({payout_naik:.2f}x < {self.min_payout:.2f}x) - Tahan order"
-                    }
-                if payout_naik > self.max_payout:
-                    return {
-                        "action": "OBSERVE",
-                        "direction": None,
-                        "reason": f"Payout NAIK ekstrim ({payout_naik:.2f}x > {self.max_payout:.2f}x) - Tahan order"
-                    }
-
+        # -------------------------------------------------------------
+        # 2. FILTER VOLATILITAS (ATR 14)
+        # -------------------------------------------------------------
+        if atr14 < config.MIN_ATR_THRESHOLD:
             return {
-                "action": "ENTER",
-                "direction": "Naik",
-                "payout": payout_naik,
-                "reason": f"RSI & Chart SINKRON BULLISH! Spot (+${diff_val:,.1f}) | RSI: {rsi_str} | Candle: {candle_color} | EMA: {ema_trend} | Payout: {payout_naik:.2f}x"
-            }
-
-        # ----------------------------------------------------
-        # KASUS 2: RSI BEARISH & CHART BEARISH -> LANGSUNG ENTRY TURUN
-        # ----------------------------------------------------
-        if rsi_bearish and chart_bearish:
-            # Filter Payout (Hanya jika diaktifkan manual)
-            if self.enable_payout_filter:
-                if payout_turun < self.min_payout:
-                    return {
-                        "action": "OBSERVE",
-                        "direction": None,
-                        "reason": f"Payout TURUN rendah ({payout_turun:.2f}x < {self.min_payout:.2f}x) - Tahan order"
-                    }
-                if payout_turun > self.max_payout:
-                    return {
-                        "action": "OBSERVE",
-                        "direction": None,
-                        "reason": f"Payout TURUN ekstrim ({payout_turun:.2f}x > {self.max_payout:.2f}x) - Tahan order"
-                    }
-
-            return {
-                "action": "ENTER",
-                "direction": "Turun",
-                "payout": payout_turun,
-                "reason": f"RSI & Chart SINKRON BEARISH! Spot (-${abs(diff_val):,.1f}) | RSI: {rsi_str} | Candle: {candle_color} | EMA: {ema_trend} | Payout: {payout_turun:.2f}x"
-            }
-
-        # ----------------------------------------------------
-        # KASUS 3: BELUM SINKRON (RSI dan Chart saling berlawanan atau selisih tipis)
-        # ----------------------------------------------------
-        if abs(diff_val) < self.min_diff:
-            return {
-                "action": "OBSERVE",
+                "prediction": "NEUTRAL",
                 "direction": None,
-                "reason": f"Selisih harga tipis (${abs(diff_val):,.2f} < ${self.min_diff:.0f}) - Menunggu arah chart tegas"
+                "score": 0.0,
+                "reason": f"Volatilitas terlalu rendah (ATR {atr14:.2f} < ${config.MIN_ATR_THRESHOLD:.2f}) - tidak cukup menutup biaya",
+                "metrics": metrics
             }
 
-        if diff_val >= self.min_diff and not rsi_bullish:
+        # -------------------------------------------------------------
+        # 3. FILTER CANDLE EKSTREM
+        # -------------------------------------------------------------
+        max_allowed_body = config.MAX_CANDLE_BODY_ATR_MULT * atr14
+        if c_metrics["body"] > max_allowed_body:
             return {
-                "action": "OBSERVE",
+                "prediction": "NEUTRAL",
                 "direction": None,
-                "reason": f"Chart Naik (+${diff_val:.1f}) tapi RSI Bearish ({rsi_str} < {self.rsi_bull_thresh:.0f}) - Menunggu sinkron"
+                "score": 0.0,
+                "reason": f"Candle sinyal bergerak terlalu jauh (Body ${c_metrics['body']:.2f} > {config.MAX_CANDLE_BODY_ATR_MULT:.1f}x ATR ${max_allowed_body:.2f})",
+                "metrics": metrics
             }
 
-        if diff_val <= -self.min_diff and not rsi_bearish:
-            return {
-                "action": "OBSERVE",
-                "direction": None,
-                "reason": f"Chart Turun (-${abs(diff_val):.1f}) tapi RSI Bullish ({rsi_str} > {self.rsi_bear_thresh:.0f}) - Menunggu sinkron"
-            }
+        # -------------------------------------------------------------
+        # 4. TREND FILTER (EMA 20 & EMA 50)
+        # -------------------------------------------------------------
+        ema_diff = ema20 - ema50
+        is_sideways = abs(ema_diff) < config.EMA_SIDEWAYS_THRESHOLD
+        ema_bullish = (ema_diff >= config.EMA_SIDEWAYS_THRESHOLD)
+        ema_bearish = (ema_diff <= -config.EMA_SIDEWAYS_THRESHOLD)
+
+        # -------------------------------------------------------------
+        # 5. MOMENTUM FILTER (RSI 14)
+        # -------------------------------------------------------------
+        rsi_bullish = (config.RSI_BUY_MIN < rsi14 < config.RSI_BUY_MAX)
+        rsi_bearish = (config.RSI_SELL_MIN < rsi14 < config.RSI_SELL_MAX)
+
+        # -------------------------------------------------------------
+        # 6. VOLUME FILTER
+        # -------------------------------------------------------------
+        vol_valid = True
+        if config.ENABLE_VOLUME_FILTER and vol_sma20 is not None:
+            vol_valid = (signal_vol > vol_sma20)
+
+        # -------------------------------------------------------------
+        # 7. EVALUASI SINYAL UP (BULLISH)
+        # -------------------------------------------------------------
+        if sweep_res["type"] == "BULLISH":
+            score = 0
+            fail_reasons = []
+
+            # Bobot Sweep: 35 poin
+            score += 35
+
+            # Bobot Trend: 25 poin
+            if ema_bullish:
+                score += 25
+            elif is_sideways:
+                score += 10
+            else:
+                fail_reasons.append("EMA Bearish (EMA20 < EMA50)")
+
+            # Bobot Momentum: 25 poin
+            if rsi_bullish:
+                score += 25
+            else:
+                fail_reasons.append(f"RSI {rsi14:.1f} di luar zona aman ({config.RSI_BUY_MIN:.0f}-{config.RSI_BUY_MAX:.0f})")
+
+            # Bobot Volume: 15 poin
+            if vol_valid:
+                score += 15
+            else:
+                fail_reasons.append(f"Volume di bawah rata-rata ({signal_vol:.1f} < {vol_sma20:.1f})")
+
+            if score >= 75:
+                return {
+                    "prediction": "UP",
+                    "direction": "UP",
+                    "score": score,
+                    "reason": f"Konfirmasi Bullish Sweep + Trend EMA + RSI ({rsi14:.1f})",
+                    "metrics": metrics
+                }
+            else:
+                return {
+                    "prediction": "NEUTRAL",
+                    "direction": None,
+                    "score": score,
+                    "reason": "Bullish sweep terdeteksi namun filter konfirmasi belum terpenuhi: " + ", ".join(fail_reasons),
+                    "metrics": metrics
+                }
+
+        # -------------------------------------------------------------
+        # 8. EVALUASI SINYAL DOWN (BEARISH)
+        # -------------------------------------------------------------
+        if sweep_res["type"] == "BEARISH":
+            score = 0
+            fail_reasons = []
+
+            # Bobot Sweep: 35 poin
+            score += 35
+
+            # Bobot Trend: 25 poin
+            if ema_bearish:
+                score += 25
+            elif is_sideways:
+                score += 10
+            else:
+                fail_reasons.append("EMA Bullish (EMA20 > EMA50)")
+
+            # Bobot Momentum: 25 poin
+            if rsi_bearish:
+                score += 25
+            else:
+                fail_reasons.append(f"RSI {rsi14:.1f} di luar zona aman ({config.RSI_SELL_MIN:.0f}-{config.RSI_SELL_MAX:.0f})")
+
+            # Bobot Volume: 15 poin
+            if vol_valid:
+                score += 15
+            else:
+                fail_reasons.append(f"Volume di bawah rata-rata ({signal_vol:.1f} < {vol_sma20:.1f})")
+
+            if score >= 75:
+                return {
+                    "prediction": "DOWN",
+                    "direction": "DOWN",
+                    "score": score,
+                    "reason": f"Konfirmasi Bearish Sweep + Trend EMA + RSI ({rsi14:.1f})",
+                    "metrics": metrics
+                }
+            else:
+                return {
+                    "prediction": "NEUTRAL",
+                    "direction": None,
+                    "score": score,
+                    "reason": "Bearish sweep terdeteksi namun filter konfirmasi belum terpenuhi: " + ", ".join(fail_reasons),
+                    "metrics": metrics
+                }
+
+        # -------------------------------------------------------------
+        # 9. TIDAK ADA SINYAL KUAT (NEUTRAL)
+        # -------------------------------------------------------------
+        reason_neutral = "Tidak ada konfirmasi liquidity sweep pada level swing 20 candle."
+        if is_sideways:
+            reason_neutral = "Pasar Sideways (EMA20 & EMA50 berdempetan) & tidak ada liquidity sweep."
 
         return {
-            "action": "OBSERVE",
+            "prediction": "NEUTRAL",
             "direction": None,
-            "reason": f"Menunggu keselarasan RSI ({rsi_str}) dan Chart ({candle_color}, {ema_trend})"
+            "score": 0.0,
+            "reason": reason_neutral,
+            "metrics": metrics
         }

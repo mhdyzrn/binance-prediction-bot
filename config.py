@@ -1,129 +1,113 @@
 import os
+from typing import Dict, Any
 
-# Fungsi pemuat file .env mandiri (tanpa perlu install library tambahan)
-def load_env(filepath=".env"):
+def load_env_file(filepath: str = ".env") -> None:
+    """Memuat environment variables dari file .env secara mandiri tanpa library eksternal"""
     if os.path.exists(filepath):
-        with open(filepath, "r") as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    key, val = line.split("=", 1)
-                    k = key.strip()
-                    if k not in os.environ:
-                        os.environ[k] = val.strip().strip("'").strip('"')
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
+                        k = k.strip()
+                        v = v.strip().strip("'").strip('"')
+                        if k not in os.environ:
+                            os.environ[k] = v
+        except Exception:
+            pass
 
-# Muat variabel dari .env
-load_env()
+# Muat dari .env lokal
+load_env_file()
+load_env_file(os.path.join(os.path.dirname(__file__), ".env"))
 
-# Mode Trading:
-# Set ke False untuk REAL / LIVE TRADING menggunakan saldo asli Binance
-# Set ke True untuk simulasi latihan
-SIMULATION_MODE = os.getenv("SIMULATION_MODE", "False").lower() == "true"
+# -------------------------------------------------------------
+# MODE OPERASI & KEAMANAN
+# -------------------------------------------------------------
+# Pilihan: SIGNAL_ONLY (Default), TESTNET, LIVE
+TRADING_MODE = os.getenv("TRADING_MODE", "SIGNAL_ONLY").upper()
 
-# Binance API Credentials (Wajib diisi di file .env jika mode REAL)
+# Perlindungan ganda untuk LIVE: Wajib konfirmasi eksplisit ENABLE_LIVE_TRADING=true
+ENABLE_LIVE_TRADING = os.getenv("ENABLE_LIVE_TRADING", "false").lower() == "true"
+if TRADING_MODE == "LIVE" and not ENABLE_LIVE_TRADING:
+    TRADING_MODE = "SIGNAL_ONLY"
+
+# Kredensial Binance API
 BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "")
 BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET", "")
+BINANCE_TESTNET = os.getenv("BINANCE_TESTNET", "true").lower() == "true"
 
-# Endpoint Binance
-# Base URL untuk transaksi SAPI/API riil
-BINANCE_BASE_URL = os.getenv("BINANCE_BASE_URL", "https://api.binance.com")
+# Endpoint Binance Futures USDT-M
+FUTURES_MAINNET_URL = "https://fapi.binance.com"
+FUTURES_TESTNET_URL = "https://testnet.binancefuture.com"
+BASE_URL = FUTURES_TESTNET_URL if (BINANCE_TESTNET and TRADING_MODE == "TESTNET") else FUTURES_MAINNET_URL
 
-# Mirror data pasar resmi Binance (Anti-blokir ISP di Indonesia)
-BINANCE_VISION_URL = "https://data-api.binance.vision"
+# -------------------------------------------------------------
+# SPESIFIKASI PASAR & PREDIKSI
+# -------------------------------------------------------------
+SYMBOL = os.getenv("SYMBOL", "BTCUSDT")
+ANALYSIS_TIMEFRAME = "1m"         # Candle 1 menit untuk analisis indikator
+PREDICTION_HORIZON_MINUTES = 5     # Horizon evaluasi 5 menit (5 candle berikutnya)
 
-# Proxy Statis (Opsional: berguna untuk IP Whitelist Binance tetap & anti-blokir di Termux)
-BINANCE_PROXY = os.getenv("BINANCE_PROXY", "")
+# -------------------------------------------------------------
+# PARAMETER STRATEGI KUANTITATIF
+# -------------------------------------------------------------
+# A. Trend Filter (EMA 20 & EMA 50)
+EMA_FAST_PERIOD = int(os.getenv("EMA_FAST_PERIOD", "20"))
+EMA_SLOW_PERIOD = int(os.getenv("EMA_SLOW_PERIOD", "50"))
+EMA_SIDEWAYS_THRESHOLD = float(os.getenv("EMA_SIDEWAYS_THRESHOLD", "8.0"))  # Jarak minimal EMA20-EMA50 ($8)
 
-# Sumber Dana Taruhan Real (Pilihan: AUTO, WALLET, CEX)
-# WALLET = Binance Web3 Prediction Wallet
-# CEX    = Binance Spot Wallet
-# AUTO   = Otomatis gunakan wallet yang memiliki saldo USDT
-FUNDING_SOURCE = os.getenv("FUNDING_SOURCE", "AUTO").upper()
+# B. Momentum Filter (RSI 14)
+RSI_PERIOD = int(os.getenv("RSI_PERIOD", "14"))
+RSI_BUY_MIN = float(os.getenv("RSI_BUY_MIN", "50.0"))
+RSI_BUY_MAX = float(os.getenv("RSI_BUY_MAX", "75.0"))
+RSI_SELL_MIN = float(os.getenv("RSI_SELL_MIN", "25.0"))
+RSI_SELL_MAX = float(os.getenv("RSI_SELL_MAX", "50.0"))
 
-# Target Pasar: BTC (Bitcoin) 5 Menit
-TARGET_ASSET = "BTC"                                # Nama tampilan
-TARGET_SYMBOL = "BTCUSDT"                           # Pasangan pasar spot
-ROUND_MINUTES = 5                                   # Durasi ronde 5 menit
-BET_AMOUNT_USDT = float(os.getenv("BET_AMOUNT", "1.0"))  # Nominal taruhan dasar (default 1 USDT)
-INITIAL_VIRTUAL_BALANCE = float(os.getenv("INITIAL_BALANCE", "10.0"))  # Saldo awal simulasi: $10.0
-SIM_BALANCE_FILE = "sim_balance.json"                 # File penyimpan saldo simulasi agar tidak ter-reset
+# C. Liquidity Sweep Detection (Swing High / Low 20 candle)
+SWING_LOOKBACK = int(os.getenv("SWING_LOOKBACK", "20"))
 
-# ==========================================================
-# SISTEM AUTO-COMPOUNDING TIERED & STEP-DOWN RULE (MAX $2)
-# ==========================================================
-ENABLE_AUTO_COMPOUND = os.getenv("ENABLE_AUTO_COMPOUND", "True").lower() == "true"
-MAX_COMPOUND_BET = float(os.getenv("MAX_COMPOUND_BET", "2.0"))  # Batas maksimal taruhan: $2.00 USDT
+# D. Volume Confirmation
+VOLUME_LOOKBACK = int(os.getenv("VOLUME_LOOKBACK", "20"))
+ENABLE_VOLUME_FILTER = os.getenv("ENABLE_VOLUME_FILTER", "true").lower() == "true"
 
-# Skema Level Compounding:
-# Tier 1: Saldo < $50.00    ➔ Bet $1.00 USDT
-# Tier 2: Saldo >= $50.00   ➔ Bet $2.00 USDT (Batas Maksimal Terkunci $2)
-# Step-Down Rule: Jika saldo turun di bawah batas tier, taruhan otomatis turun (step-down) ke tier sebelumnya
-COMPOUND_TIERS = [
-    (50.0,  2.0, "Tier 2 ($50+ Max $2)"),
-    (0.0,   1.0, "Tier 1 ($10+)"),
-]
+# E. ATR & Volatility Filter
+ATR_PERIOD = int(os.getenv("ATR_PERIOD", "14"))
+MIN_ATR_THRESHOLD = float(os.getenv("MIN_ATR_THRESHOLD", "15.0"))  # Volatilitas minimal ($15 per candle)
 
+# F. Filter Candle Ekstrem & Spread
+MAX_CANDLE_BODY_ATR_MULT = float(os.getenv("MAX_CANDLE_BODY_ATR_MULT", "2.5"))  # Hindari entry jika candle melompat > 2.5x ATR
+MAX_SPREAD_USDT = float(os.getenv("MAX_SPREAD_USDT", "5.0"))                   # Toleransi spread bid-ask
 
-def calculate_compound_bet(balance: float) -> tuple[float, str]:
-    """
-    Menghitung ukuran taruhan dinamis berdasarkan saldo saat ini.
-    Maksimal taruhan dibatasi $2.00 USDT (atau MAX_COMPOUND_BET).
-    Menerapkan Step-Down Rule secara otomatis:
-    - Jika saldo naik melewati batas tier -> taruhan naik ke tier berikutnya.
-    - Jika saldo turun di bawah batas tier -> taruhan otomatis turun (step-down)
-      untuk melindungi modal dari drawdown.
-    """
-    if not ENABLE_AUTO_COMPOUND:
-        return min(BET_AMOUNT_USDT, MAX_COMPOUND_BET), "Fixed"
+# G. Cooldown
+COOLDOWN_MINUTES = int(os.getenv("COOLDOWN_MINUTES", "5"))                     # Jeda 5 menit setelah entry
 
-    for min_bal, bet_amt, tier_name in COMPOUND_TIERS:
-        if balance >= min_bal:
-            capped_bet = min(bet_amt, MAX_COMPOUND_BET)
-            actual_bet = min(capped_bet, balance) if balance > 0 else capped_bet
-            return actual_bet, tier_name
+# -------------------------------------------------------------
+# MANAJEMEN RISIKO & BIAYA TRANSAKSI FUTURES
+# -------------------------------------------------------------
+DEFAULT_LEVERAGE = int(os.getenv("DEFAULT_LEVERAGE", "3"))                     # Leverage rendah (3x)
+RISK_PER_TRADE_PERCENT = float(os.getenv("RISK_PER_TRADE_PERCENT", "1.0"))     # Maks 1% risiko modal per trade
+TAKER_FEE_RATE = float(os.getenv("TAKER_FEE_RATE", "0.0005"))                  # Fee taker Binance Futures 0.05%
+MAKER_FEE_RATE = float(os.getenv("MAKER_FEE_RATE", "0.0002"))                  # Fee maker 0.02%
+SLIPPAGE_RATE = float(os.getenv("SLIPPAGE_RATE", "0.0002"))                    # Estimasi slippage 0.02%
+STOP_LOSS_ATR_MULT = float(os.getenv("STOP_LOSS_ATR_MULT", "1.5"))             # SL 1.5x ATR
+TAKE_PROFIT_ATR_MULT = float(os.getenv("TAKE_PROFIT_ATR_MULT", "2.0"))         # TP 2.0x ATR
+MAX_ACTIVE_POSITIONS = 1
+KILL_SWITCH_DRAWDOWN = 0.10                                                    # Matikan bot jika drawdown > 10%
 
-    return min(BET_AMOUNT_USDT, MAX_COMPOUND_BET), "Tier 1 ($10+)"
-
-
-# Parameter Strategi Momentum RSI & Chart Synchronizer (BTC 5 Menit)
-# Filter payout dinonaktifkan (default False); Eksekusi langsung saat RSI & Chart sinkron
-ENABLE_PAYOUT_FILTER = os.getenv("ENABLE_PAYOUT_FILTER", "False").lower() == "true"  # Filter Payout Dimatikan (Default: False)
-SNIPER_TRIGGER_SECONDS = int(os.getenv("SNIPER_TRIGGER_SECONDS", "210"))   # Jendela evaluasi mulai: sisa 3 menit 30 detik (03:30)
-SNIPER_DEADLINE_SECONDS = int(os.getenv("SNIPER_DEADLINE_SECONDS", "15"))  # Batas akhir eksekusi: sisa 15 detik (00:15)
-SNIPER_MIN_DIFF = float(os.getenv("SNIPER_MIN_DIFF", "5.0"))               # Minimal selisih harga BTC ($5) untuk konfirmasi arah
-MIN_PAYOUT_MULTIPLIER = float(os.getenv("MIN_PAYOUT_MULTIPLIER", "1.25")) # (Hanya aktif jika ENABLE_PAYOUT_FILTER=True)
-MAX_PAYOUT_MULTIPLIER = float(os.getenv("MAX_PAYOUT_MULTIPLIER", "2.20")) # (Hanya aktif jika ENABLE_PAYOUT_FILTER=True)
-SLIPPAGE_BPS = int(os.getenv("SLIPPAGE_BPS", "2000"))                     # Toleransi slippage: default 20% (2000 basis points)
-
-# Parameter Indikator RSI & Momentum (1M timeframe)
-RSI_PERIOD = 14                                       # Periode RSI 14
-RSI_BULLISH_THRESHOLD = float(os.getenv("RSI_BULLISH_THRESHOLD", "48.0"))  # Ambang batas RSI Bullish (>= 48)
-RSI_BEARISH_THRESHOLD = float(os.getenv("RSI_BEARISH_THRESHOLD", "52.0"))  # Ambang batas RSI Bearish (<= 52)
-RSI_MIN_NAIK = 48.0                                   # Minimal RSI 48 untuk konfirmasi momentum bullish Naik
-RSI_OVERBOUGHT = 75.0                                 # Tahan sinyal NAIK jika RSI > 75 (rawan jenuh beli)
-RSI_MAX_TURUN = 52.0                                  # Maksimal RSI 52 untuk konfirmasi momentum bearish Turun
-RSI_OVERSOLD = 25.0                                   # Tahan sinyal TURUN jika RSI < 25 (rawan jenuh jual)
-
-# Proteksi Kekalahan Beruntun (Cooldown untuk pengujian 24 Jam)
-# Catatan: Daily Stop-Loss dan Daily Take-Profit dinonaktifkan sesuai permintaan pengujian 24 jam
-MAX_CONSECUTIVE_LOSS = 2                              # Jika 2x loss beruntun, jeda 1 ronde untuk hindari market liar
-COOLDOWN_ROUNDS = 1                                   # Jumlah ronde istirahat saat cooldown aktif (1 ronde = 5 menit)
-
-# Penyimpanan Histori Transaksi Permanen Terpisah (Real vs Simulasi)
-SIM_HISTORY_FILE = "trade_history.json"                   # Riwayat transaksi simulasi
-REAL_HISTORY_FILE = "real_trade_history.json"             # Riwayat transaksi real live
-HISTORY_FILE = REAL_HISTORY_FILE if not SIMULATION_MODE else SIM_HISTORY_FILE
-LOOP_INTERVAL_SECONDS = 1                             # Refresh rate interval dasar
-
-# Sistem Log Kecenderungan Pasar (Market Tendency & Telemetry)
-MARKET_TENDENCY_FILE = "market_tendency.json"             # Penyimpanan log kecenderungan tiap ronde
-TENDENCY_LOOKBACK_ROUNDS = 12                             # Jumlah ronde terakhir untuk analisis bias tren (12 ronde = 1 jam)
-MIN_STRONG_BIAS_DIFF = 20.0                               # Minimal selisih ($) jika mencoba order melawan bias pasar kuat
-
-# Parameter Analisis Chart Teknikal (EMA & Support/Resistance)
-ENABLE_CHART_ANALYSIS = True                              # Aktifkan analisis teknikal chart (EMA & S/R)
-EMA_FAST_PERIOD = 9                                       # Periode EMA Cepat (9 menit)
-EMA_SLOW_PERIOD = 21                                      # Periode EMA Lambat (21 menit)
-SR_LOOKBACK_CANDLES = 15                                  # Jumlah candle 1M untuk level Support & Resistance (15 menit)
-SR_BUFFER_USD = 8.0                                       # Jarak pengaman minimal ($8) dari atap Resistance / lantai Support
-
+def get_summary_dict() -> Dict[str, Any]:
+    """Mengembalikan ringkasan konfigurasi sistem aktif"""
+    return {
+        "symbol": SYMBOL,
+        "mode": TRADING_MODE,
+        "base_url": BASE_URL,
+        "analysis_timeframe": ANALYSIS_TIMEFRAME,
+        "horizon_minutes": PREDICTION_HORIZON_MINUTES,
+        "ema_fast": EMA_FAST_PERIOD,
+        "ema_slow": EMA_SLOW_PERIOD,
+        "rsi_period": RSI_PERIOD,
+        "atr_period": ATR_PERIOD,
+        "min_atr": MIN_ATR_THRESHOLD,
+        "volume_filter": ENABLE_VOLUME_FILTER,
+        "leverage": DEFAULT_LEVERAGE
+    }

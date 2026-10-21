@@ -31,7 +31,6 @@ class QuantitativeBacktester:
 
         while remaining > 0:
             batch_size = min(remaining, 1000)
-            url = f"{self.client.base_url}/fapi/v1/klines"
             params = {
                 "symbol": config.SYMBOL,
                 "interval": "1m",
@@ -40,32 +39,42 @@ class QuantitativeBacktester:
             if end_time_ms:
                 params["endTime"] = end_time_ms
 
-            try:
-                resp = self.client.session.get(url, params=params, timeout=10)
-                if resp.status_code == 200:
-                    raw = resp.json()
-                    if not raw:
+            endpoints = [
+                "https://data-api.binance.vision/api/v3/klines",
+                f"{self.client.base_url}/fapi/v1/klines",
+                "https://testnet.binancefuture.com/fapi/v1/klines"
+            ]
+            batch_success = False
+            for ep in endpoints:
+                try:
+                    resp = self.client.session.get(ep, params=params, timeout=(2.5, 5.0))
+                    if resp.status_code == 200:
+                        raw = resp.json()
+                        if not raw:
+                            break
+                        batch_candles = []
+                        for k in raw:
+                            batch_candles.append({
+                                "open_time": int(k[0]) / 1000.0,
+                                "open": float(k[1]),
+                                "high": float(k[2]),
+                                "low": float(k[3]),
+                                "close": float(k[4]),
+                                "volume": float(k[5]),
+                                "close_time": int(k[6]) / 1000.0,
+                                "is_closed": True
+                            })
+                        candles = batch_candles + candles
+                        remaining -= len(batch_candles)
+                        end_time_ms = int(raw[0][0]) - 1
+                        batch_success = True
+                        time.sleep(0.1)
                         break
-                    batch_candles = []
-                    for k in raw:
-                        batch_candles.append({
-                            "open_time": int(k[0]) / 1000.0,
-                            "open": float(k[1]),
-                            "high": float(k[2]),
-                            "low": float(k[3]),
-                            "close": float(k[4]),
-                            "volume": float(k[5]),
-                            "close_time": int(k[6]) / 1000.0,
-                            "is_closed": True
-                        })
-                    candles = batch_candles + candles
-                    remaining -= len(batch_candles)
-                    end_time_ms = int(raw[0][0]) - 1
-                    time.sleep(0.2)
-                else:
-                    break
-            except Exception as e:
-                print(f"Error fetching historical data: {e}")
+                except Exception:
+                    continue
+
+            if not batch_success:
+                print("Gagal mengambil batch data dari semua mirror.")
                 break
 
         print(f"Berhasil mengunduh {len(candles)} candle historis.")
