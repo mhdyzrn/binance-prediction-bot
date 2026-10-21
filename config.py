@@ -82,6 +82,11 @@ MAX_SPREAD_USDT = float(os.getenv("MAX_SPREAD_USDT", "5.0"))                   #
 # G. Cooldown
 COOLDOWN_MINUTES = int(os.getenv("COOLDOWN_MINUTES", "5"))                     # Jeda 5 menit setelah entry
 
+# H. Simulasi Paper Trading & Saldo Virtual
+INITIAL_SIM_BALANCE = float(os.getenv("INITIAL_SIM_BALANCE", "100.0"))         # Saldo awal simulasi: $100.00 USDT
+SIM_TRADE_SIZE_USDT = float(os.getenv("SIM_TRADE_SIZE_USDT", "10.0"))          # Ukuran per trade simulasi: $10.00 USDT
+SIM_BALANCE_FILE = "sim_balance.json"
+
 # -------------------------------------------------------------
 # MANAJEMEN RISIKO & BIAYA TRANSAKSI FUTURES
 # -------------------------------------------------------------

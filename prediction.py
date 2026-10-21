@@ -25,19 +25,40 @@ class PredictionRecord:
     price_change_pct: Optional[float] = None
     gross_pnl_pct: Optional[float] = None
     net_pnl_pct: Optional[float] = None
+    net_pnl_usdt: Optional[float] = None
     is_profitable: Optional[bool] = None
 
 class PredictionEngine:
     """
     Sistem Evaluasi & Pelacakan Prediksi Terpisah (Separated Prediction Evaluator).
     Memisahkan antara 'Akurasi Arah (Directional Accuracy)' dan 'Profitabilitas Realistis (Net PnL)',
-    karena prediksi arah yang benar belum tentu menutup biaya taker fee Binance Futures dan slippage.
+    serta menyediakan simulasi saldo virtual (Paper Trading) secara real-time.
     """
 
     def __init__(self, log_filepath: str = "prediction_history.json"):
         self.log_filepath = log_filepath
+        self.sim_balance_file = getattr(config, "SIM_BALANCE_FILE", "sim_balance.json")
+        self.virtual_balance: float = self._load_virtual_balance()
         self.records: List[PredictionRecord] = []
         self.load_history()
+
+    def _load_virtual_balance(self) -> float:
+        init_bal = getattr(config, "INITIAL_SIM_BALANCE", 100.0)
+        if os.path.exists(self.sim_balance_file):
+            try:
+                with open(self.sim_balance_file, "r") as f:
+                    data = json.load(f)
+                    return float(data.get("virtual_balance", init_bal))
+            except Exception:
+                pass
+        return init_bal
+
+    def _save_virtual_balance(self) -> None:
+        try:
+            with open(self.sim_balance_file, "w") as f:
+                json.dump({"virtual_balance": round(self.virtual_balance, 2), "updated_at": time.time()}, f, indent=2)
+        except Exception:
+            pass
 
     def record_prediction(
         self,
@@ -111,7 +132,18 @@ class PredictionEngine:
                     rec.is_direction_correct = None
                     rec.gross_pnl_pct = 0.0
                     rec.net_pnl_pct = 0.0
+                    rec.net_pnl_usdt = 0.0
                     rec.is_profitable = None
+
+                # Update saldo simulasi (Paper Trading)
+                if rec.category in ["UP", "DOWN"] and rec.net_pnl_pct is not None:
+                    trade_size = getattr(config, "SIM_TRADE_SIZE_USDT", 10.0)
+                    actual_stake = min(trade_size, self.virtual_balance) if self.virtual_balance > 0 else trade_size
+                    pnl_usdt = round(actual_stake * (rec.net_pnl_pct / 100.0), 2)
+                    rec.net_pnl_usdt = pnl_usdt
+                    if self.virtual_balance > 0:
+                        self.virtual_balance = max(0.0, round(self.virtual_balance + pnl_usdt, 2))
+                        self._save_virtual_balance()
 
                 evaluated_now.append(rec)
 
@@ -143,7 +175,11 @@ class PredictionEngine:
         avg_net_pnl = (sum(net_pnls) / len(net_pnls)) if net_pnls else 0.0
         cum_net_pnl = sum(net_pnls) if net_pnls else 0.0
 
+        cum_pnl_usdt = round(sum(r.net_pnl_usdt for r in eval_records if r.net_pnl_usdt is not None), 2)
+
         return {
+            "virtual_balance": round(self.virtual_balance, 2),
+            "cum_net_pnl_usdt": cum_pnl_usdt,
             "total_predictions": len(self.records),
             "total_evaluated": total_eval,
             "count_up": len(up_records),

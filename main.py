@@ -116,23 +116,30 @@ class BtcPredictionApp:
             hasil_str = "\033[1;92mBENAR\033[0m" if last_eval.is_direction_correct else "\033[1;91mSALAH\033[0m"
             econ_str = "\033[1;92mPROFIT\033[0m" if last_eval.is_profitable else "\033[1;91mLOSS\033[0m"
             pnl_sign = "+" if (last_eval.net_pnl_pct or 0) >= 0 else ""
+            pnl_usdt_val = getattr(last_eval, "net_pnl_usdt", 0.0)
+            pnl_usdt_str = f"({pnl_sign}${pnl_usdt_val:.2f} USDT)" if pnl_usdt_val is not None else ""
             output_lines.extend([
                 f"\033[1mTarget Evaluasi Terakhir ({last_eval.prediction_id}):\033[0m\033[K",
                 f"Harga entry ({last_eval.category}) : {last_eval.entry_price:,.2f} USDT\033[K",
                 f"Harga 5m kemudian   : {last_eval.actual_price_5m:,.2f} USDT\033[K",
                 f"Akurasi Arah        : {hasil_str}\033[K",
-                f"Net Return (fee+slip): {pnl_sign}{last_eval.net_pnl_pct:.4f}% ({econ_str})\033[K"
+                f"Net Return (fee+slip): {pnl_sign}{last_eval.net_pnl_pct:.4f}% {pnl_usdt_str} ({econ_str})\033[K"
             ])
         else:
             output_lines.append(f"Target evaluasi : Menunggu candle 5m berikutnya...\033[K")
 
+        cum_usdt = stats.get('cum_net_pnl_usdt', 0.0)
+        cum_usdt_sign = "+" if cum_usdt >= 0 else ""
         output_lines.extend([
             f"====================================================\033[K",
+            f"PORTFOLIO SIMULASI (PAPER TRADING):\033[K",
+            f"Saldo Virtual    : \033[1;32m${stats['virtual_balance']:,.2f} USDT\033[0m (Size: ${config.SIM_TRADE_SIZE_USDT:.0f}/posisi)\033[K",
+            f"Net PnL Simulasi : {cum_usdt_sign}${cum_usdt:.2f} USDT ({stats['cum_net_pnl_pct']:+.2f}%)\033[K",
+            f"----------------------------------------------------\033[K",
             f"STATISTIK EVALUASI TERKALIBRASI:\033[K",
             f"Total Evaluasi   : {stats['total_evaluated']} trade (UP: {stats['count_up']} | DOWN: {stats['count_down']})\033[K",
             f"Directional Acc  : \033[1;36m{stats['directional_accuracy']}%\033[0m (UP: {stats['up_accuracy']}% | DOWN: {stats['down_accuracy']}%)\033[K",
             f"Economic Win Rate: \033[1;32m{stats['economic_win_rate']}%\033[0m (Setelah Taker Fee & Slippage)\033[K",
-            f"Net PnL Kumulatif: {stats['cum_net_pnl_pct']:+.4f}%\033[K",
             f"====================================================\033[K",
             f"Tekan Ctrl+C untuk berhenti secara aman.\033[K"
         ])
