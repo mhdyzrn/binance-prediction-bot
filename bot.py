@@ -82,6 +82,19 @@ class BinanceAppPredictionBot:
         else:
             tend_badge = f"\033[1;36m◆ {tendency_bias}\033[0m"
 
+        # Status Analisis Chart (EMA 9/21 & Support/Resistance)
+        ema_trend = m.get("ema_trend", "NETRAL")
+        if ema_trend == "BULLISH":
+            ema_badge = "\033[1;92m▲ BULLISH (9>21)\033[0m"
+        elif ema_trend == "BEARISH":
+            ema_badge = "\033[1;91m▼ BEARISH (9<21)\033[0m"
+        else:
+            ema_badge = "\033[1;36m◆ NETRAL\033[0m"
+
+        res_val = m.get("resistance")
+        sup_val = m.get("support")
+        sr_str = f"Res: ${res_val:,.0f} | Sup: ${sup_val:,.0f}" if (res_val and sup_val) else "Memuat..."
+
         # Status Koneksi Jaringan
         is_online = m.get("is_online", True)
         stale_sec = m.get("stale_seconds", 0)
@@ -100,6 +113,7 @@ class BinanceAppPredictionBot:
             f"  Strike (5M Open): \033[1;37m${m['strike_price']:,.2f}\033[0m",
             f"  Harga Spot Live : {diff_colored}",
             f"  Indikator RSI   : {rsi_badge} | 1M: {c_badge}",
+            f"  Analisis Chart  : {ema_badge} \033[90m({sr_str})\033[0m",
             f"  Kecenderungan   : {tend_badge}" + (f" \033[90m({tendency_stat})\033[0m" if tendency_stat else ""),
             f"  Hitung Mundur   : \033[1;93m{m['countdown_str']}\033[0m \033[96m{spinner_char}\033[0m",
             " ──────────────────────────────────────────",

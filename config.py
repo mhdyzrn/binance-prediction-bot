@@ -117,3 +117,10 @@ MARKET_TENDENCY_FILE = "market_tendency.json"             # Penyimpanan log kece
 TENDENCY_LOOKBACK_ROUNDS = 12                             # Jumlah ronde terakhir untuk analisis bias tren (12 ronde = 1 jam)
 MIN_STRONG_BIAS_DIFF = 20.0                               # Minimal selisih ($) jika mencoba order melawan bias pasar kuat
 
+# Parameter Analisis Chart Teknikal (EMA & Support/Resistance)
+ENABLE_CHART_ANALYSIS = True                              # Aktifkan analisis teknikal chart (EMA & S/R)
+EMA_FAST_PERIOD = 9                                       # Periode EMA Cepat (9 menit)
+EMA_SLOW_PERIOD = 21                                      # Periode EMA Lambat (21 menit)
+SR_LOOKBACK_CANDLES = 15                                  # Jumlah candle 1M untuk level Support & Resistance (15 menit)
+SR_BUFFER_USD = 8.0                                       # Jarak pengaman minimal ($8) dari atap Resistance / lantai Support
+

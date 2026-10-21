@@ -660,10 +660,15 @@ class PredictionEngine:
         self.last_settlement_check = 0.0
         self._strike_is_fallback = False
         
-        # State RSI & Proteksi Cooldown
+        # State RSI & Analisis Chart Teknikal (EMA & S/R)
         self.cached_rsi: Optional[float] = None
         self.cached_candle_color: str = "NEUTRAL"
         self.cached_candle_change: float = 0.0
+        self.cached_ema9: Optional[float] = None
+        self.cached_ema21: Optional[float] = None
+        self.cached_ema_trend: str = "NETRAL"
+        self.cached_resistance: Optional[float] = None
+        self.cached_support: Optional[float] = None
         self.last_rsi_update = 0.0
         self.consecutive_losses = 0
         self.cooldown_rounds_left = 0
@@ -749,12 +754,16 @@ class PredictionEngine:
                 if now - self.last_price_timestamp > 5:
                     self.is_online = False
 
-            # 2. Update RSI & Candle Micro-Momentum secara berkala (tiap 3 detik)
+            # 2. Update Analisis Chart Teknikal (RSI, EMA 9/21, S/R, Candle 1M) secara berkala (tiap 3 detik)
             if now - self.last_rsi_update >= 3.0:
                 try:
-                    klines = self.client.get_klines(config.TARGET_SYMBOL, interval="1m", limit=config.RSI_PERIOD + 10)
-                    if klines and len(klines) >= config.RSI_PERIOD + 1:
+                    klines = self.client.get_klines(config.TARGET_SYMBOL, interval="1m", limit=35)
+                    if klines and len(klines) >= 25:
                         closes = [float(k[4]) for k in klines]
+                        highs = [float(k[2]) for k in klines]
+                        lows = [float(k[3]) for k in klines]
+
+                        # A. Indikator RSI-14
                         gains = []
                         losses = []
                         for i in range(1, len(closes)):
@@ -770,7 +779,33 @@ class PredictionEngine:
                             rs = avg_gain / avg_loss
                             self.cached_rsi = round(100.0 - (100.0 / (1.0 + rs)), 2)
 
-                        # Micro-momentum candle 1M terkini
+                        # B. Indikator EMA 9 & EMA 21 (Tren Chart Utama)
+                        def _calc_ema(series, n):
+                            k_mult = 2.0 / (n + 1)
+                            ema_val = series[0]
+                            for s in series[1:]:
+                                ema_val = (s * k_mult) + (ema_val * (1.0 - k_mult))
+                            return ema_val
+
+                        fast_p = getattr(config, "EMA_FAST_PERIOD", 9)
+                        slow_p = getattr(config, "EMA_SLOW_PERIOD", 21)
+                        ema9 = _calc_ema(closes, fast_p)
+                        ema21 = _calc_ema(closes, slow_p)
+                        self.cached_ema9 = round(ema9, 2)
+                        self.cached_ema21 = round(ema21, 2)
+                        if self.cached_ema9 > self.cached_ema21 + 1.5:
+                            self.cached_ema_trend = "BULLISH"
+                        elif self.cached_ema9 < self.cached_ema21 - 1.5:
+                            self.cached_ema_trend = "BEARISH"
+                        else:
+                            self.cached_ema_trend = "NETRAL"
+
+                        # C. Dynamic Support & Resistance (15M High/Low Level)
+                        sr_window = getattr(config, "SR_LOOKBACK_CANDLES", 15)
+                        self.cached_resistance = round(max(highs[-sr_window:]), 2)
+                        self.cached_support = round(min(lows[-sr_window:]), 2)
+
+                        # D. Micro-momentum candle 1M terkini
                         last_k = klines[-1]
                         k_open = float(last_k[1])
                         k_close = float(last_k[4])
@@ -1332,6 +1367,13 @@ class PredictionEngine:
             "rsi": self.cached_rsi,
             "candle_color": self.cached_candle_color,
             "candle_change": self.cached_candle_change,
+            "ema9": self.cached_ema9,
+            "ema21": self.cached_ema21,
+            "ema_trend": self.cached_ema_trend,
+            "resistance": self.cached_resistance,
+            "support": self.cached_support,
+            "dist_resistance": round(self.cached_resistance - self.live_btc_price, 2) if self.cached_resistance else None,
+            "dist_support": round(self.live_btc_price - self.cached_support, 2) if self.cached_support else None,
             "tendency_bias": tendency_summary["bias"],
             "tendency_stat": f"{tendency_summary['naik_count']} Naik / {tendency_summary['turun_count']} Turun ({tendency_summary['lookback_rounds']} Ronde)",
             "tendency_summary": tendency_summary,

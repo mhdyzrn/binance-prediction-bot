@@ -64,6 +64,10 @@ class PredictionStrategy:
         tendency_bias = market.get("tendency_bias", "")
         tendency_stat = market.get("tendency_stat", "")
         min_strong_diff = getattr(config, "MIN_STRONG_BIAS_DIFF", 20.0)
+        ema_trend = market.get("ema_trend", "NETRAL")
+        dist_res = market.get("dist_resistance")
+        dist_sup = market.get("dist_support")
+        sr_buffer = getattr(config, "SR_BUFFER_USD", 8.0)
 
         # Kasus A: Spot BTC unggul di atas target strike (Potensi NAIK)
         if diff_val >= self.min_diff:
@@ -117,11 +121,27 @@ class PredictionStrategy:
                     "reason": f"Bias pasar BEARISH KUAT ({tendency_stat}) - Tahan NAIK (Butuh selisih >${min_strong_diff:.0f})"
                 }
 
+            # Filter 7: EMA Trend Filter (Cegah beli NAIK jika tren grafik EMA Bearish 9 < 21)
+            if ema_trend == "BEARISH":
+                return {
+                    "action": "OBSERVE",
+                    "direction": None,
+                    "reason": "Chart Melawan Tren: EMA Bearish (9 < 21) - Tahan NAIK"
+                }
+
+            # Filter 8: Resistance Wall Guard (Cegah beli NAIK tepat di pucuk resistance)
+            if dist_res is not None and 0 <= dist_res < sr_buffer:
+                return {
+                    "action": "OBSERVE",
+                    "direction": None,
+                    "reason": f"Chart Mentok Resistance (${market.get('resistance', 0):,.1f}, sisa ${dist_res:.1f}) - Tahan NAIK rawan mantul"
+                }
+
             return {
                 "action": "ENTER",
                 "direction": "Naik",
                 "payout": payout,
-                "reason": f"Momentum NAIK Kuat! Spot (+${diff_val:,.1f}) | Payout: {payout:.2f}x | RSI: {rsi_str}"
+                "reason": f"Momentum NAIK Kuat! Spot (+${diff_val:,.1f}) | Payout: {payout:.2f}x | RSI: {rsi_str} | EMA: {ema_trend}"
             }
 
         # Kasus B: Spot BTC unggul di bawah target strike (Potensi TURUN)
@@ -176,11 +196,27 @@ class PredictionStrategy:
                     "reason": f"Bias pasar BULLISH KUAT ({tendency_stat}) - Tahan TURUN (Butuh selisih >${min_strong_diff:.0f})"
                 }
 
+            # Filter 7: EMA Trend Filter (Cegah beli TURUN jika tren grafik EMA Bullish 9 > 21)
+            if ema_trend == "BULLISH":
+                return {
+                    "action": "OBSERVE",
+                    "direction": None,
+                    "reason": "Chart Melawan Tren: EMA Bullish (9 > 21) - Tahan TURUN"
+                }
+
+            # Filter 8: Support Floor Guard (Cegah beli TURUN tepat di dasar support)
+            if dist_sup is not None and 0 <= dist_sup < sr_buffer:
+                return {
+                    "action": "OBSERVE",
+                    "direction": None,
+                    "reason": f"Chart Mentok Support (${market.get('support', 0):,.1f}, sisa ${dist_sup:.1f}) - Tahan TURUN rawan mantul"
+                }
+
             return {
                 "action": "ENTER",
                 "direction": "Turun",
                 "payout": payout,
-                "reason": f"Momentum TURUN Kuat! Spot (-${abs(diff_val):,.1f}) | Payout: {payout:.2f}x | RSI: {rsi_str}"
+                "reason": f"Momentum TURUN Kuat! Spot (-${abs(diff_val):,.1f}) | Payout: {payout:.2f}x | RSI: {rsi_str} | EMA: {ema_trend}"
             }
 
         # Kasus C: Selisih tipis di bawah MIN_DIFF (< $15)
