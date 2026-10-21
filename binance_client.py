@@ -665,6 +665,7 @@ class PredictionEngine:
         self.last_rsi_update = 0.0
         self.consecutive_losses = 0
         self.cooldown_rounds_left = 0
+        self.last_cooldown_loss_id = None
 
         # Riwayat transaksi tersimpan permanen di file terpisah (Real vs Simulasi)
         self.history_file = config.REAL_HISTORY_FILE if self.is_real else config.SIM_HISTORY_FILE
@@ -678,8 +679,20 @@ class PredictionEngine:
             else:
                 break
         self.consecutive_losses = loss_cnt
-        if self.consecutive_losses >= config.MAX_CONSECUTIVE_LOSS:
+        latest_trade = self.history[-1] if self.history else None
+        latest_end_ts = latest_trade.get("end_timestamp", 0) if latest_trade else 0
+        cooldown_window_sec = config.COOLDOWN_ROUNDS * config.ROUND_MINUTES * 60
+        is_recent = (time.time() - latest_end_ts) <= cooldown_window_sec if latest_end_ts else False
+
+        if self.consecutive_losses >= config.MAX_CONSECUTIVE_LOSS and is_recent:
             self.cooldown_rounds_left = config.COOLDOWN_ROUNDS
+            self.last_cooldown_loss_id = latest_trade.get("position_id")
+        else:
+            self.cooldown_rounds_left = 0
+            if latest_trade:
+                self.last_cooldown_loss_id = latest_trade.get("position_id")
+            if not is_recent:
+                self.consecutive_losses = 0
 
         # Saldo simulasi tersimpan permanen agar tidak ter-reset jika tidak habis
         self.sim_balance_file = config.SIM_BALANCE_FILE
@@ -901,7 +914,8 @@ class PredictionEngine:
                     "final_price": p.get("finalOutcome"),
                     "is_real": True,
                     "position_id": p.get("positionId"),
-                    "market_title": topic_title
+                    "market_title": topic_title,
+                    "end_timestamp": end_ts
                 })
 
             synced.reverse()  # Urutan kronologis (terlama ke terbaru)
@@ -915,8 +929,25 @@ class PredictionEngine:
                 else:
                     break
             self.consecutive_losses = loss_cnt
-            if self.consecutive_losses >= config.MAX_CONSECUTIVE_LOSS:
-                self.cooldown_rounds_left = config.COOLDOWN_ROUNDS
+            latest_trade = synced[-1] if synced else None
+            latest_id = latest_trade.get("position_id") if latest_trade else None
+            latest_end_ts = latest_trade.get("end_timestamp", 0) if latest_trade else 0
+            cooldown_window_sec = config.COOLDOWN_ROUNDS * config.ROUND_MINUTES * 60
+            is_recent = (time.time() - latest_end_ts) <= cooldown_window_sec if latest_end_ts else False
+
+            # Cooldown hanya aktif jika:
+            # 1. Kekalahan beruntun >= MAX_CONSECUTIVE_LOSS
+            # 2. Kekalahan terjadi baru-baru ini (dalam rentang waktu jeda ronde)
+            # 3. ID kekalahan ini belum pernah memicu cooldown sebelumnya
+            if self.consecutive_losses >= config.MAX_CONSECUTIVE_LOSS and is_recent:
+                if self.last_cooldown_loss_id != latest_id:
+                    self.cooldown_rounds_left = config.COOLDOWN_ROUNDS
+                    self.last_cooldown_loss_id = latest_id
+            elif not is_recent:
+                self.cooldown_rounds_left = 0
+                if latest_id:
+                    self.last_cooldown_loss_id = latest_id
+                self.consecutive_losses = 0
 
             if save:
                 self._save_history()
@@ -996,6 +1027,8 @@ class PredictionEngine:
                 self._resolve_round(self.live_btc_price)
                 if self.cooldown_rounds_left > 0:
                     self.cooldown_rounds_left -= 1
+                    if self.cooldown_rounds_left == 0:
+                        self.consecutive_losses = 0
             if self.is_real:
                 try:
                     self.sync_real_history(save=True)
@@ -1194,6 +1227,7 @@ class PredictionEngine:
                     self.consecutive_losses += 1
                     if self.consecutive_losses >= config.MAX_CONSECUTIVE_LOSS:
                         self.cooldown_rounds_left = config.COOLDOWN_ROUNDS
+                        self.last_cooldown_loss_id = pos.get("expiry_str")
 
                 self.history.append({
                     "round": pos["expiry_str"][-8:],
@@ -1203,7 +1237,8 @@ class PredictionEngine:
                     "payout": payout,
                     "strike": pos.get("strike_price"),
                     "final_price": final_price,
-                    "is_real": False
+                    "is_real": False,
+                    "end_timestamp": time.time()
                 })
 
             self.active_positions = remaining
@@ -1324,6 +1359,7 @@ class PredictionEngine:
                     self.consecutive_losses += 1
                     if self.consecutive_losses >= config.MAX_CONSECUTIVE_LOSS:
                         self.cooldown_rounds_left = config.COOLDOWN_ROUNDS
+                        self.last_cooldown_loss_id = matched.get("positionId")
 
                 self.history.append({
                     "round": pending_round_str,
@@ -1336,7 +1372,8 @@ class PredictionEngine:
                     "final_price": matched.get("finalOutcome"),
                     "is_real": True,
                     "position_id": matched.get("positionId"),
-                    "market_title": matched.get("marketTopicTitle")
+                    "market_title": matched.get("marketTopicTitle"),
+                    "end_timestamp": time.time()
                 })
             else:
                 # Cek apakah sudah timeout (> 240 detik / 4 menit dari waktu penyelesaian diajukan)
@@ -1357,6 +1394,7 @@ class PredictionEngine:
                         self.consecutive_losses += 1
                         if self.consecutive_losses >= config.MAX_CONSECUTIVE_LOSS:
                             self.cooldown_rounds_left = config.COOLDOWN_ROUNDS
+                            self.last_cooldown_loss_id = pending.get("position_id")
 
                     self.history.append({
                         "round": pending_round_str,
@@ -1368,7 +1406,8 @@ class PredictionEngine:
                         "strike": target_strike,
                         "final_price": final_p,
                         "is_real": True,
-                        "fallback": True
+                        "fallback": True,
+                        "end_timestamp": time.time()
                     })
                 else:
                     still_pending.append(pending)
