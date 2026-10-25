@@ -60,14 +60,12 @@ Bot ini memisahkan secara ketat kedua metrik tersebut pada evaluasi $T+5\text{m}
 
 ## 3. Mode Operasi & Keamanan
 
-Bot memiliki 3 mode operasi terisolasi di [`config.py`](file:///data/data/com.termux/files/home/binance-prediction-bot/btc_prediction_bot/config.py):
+Bot Futures saat ini hanya mendukung analisis dan paper tracking. Kode ini belum memiliki order executor atau pelacakan posisi berbasis exchange:
 
 * **MODE 1: `SIGNAL_ONLY` (Default)**
   - Murni menganalisis pasar, menampilkan prediksi di dashboard terminal, dan mengukur akurasi tanpa mengirim order ke Binance.
-* **MODE 2: `TESTNET`**
-  - Menguji proses order di Binance Futures Testnet tanpa risiko uang nyata.
-* **MODE 3: `LIVE`**
-  - Dinonaktifkan secara default. Membutuhkan izin eksplisit `ENABLE_LIVE_TRADING=true` di file `.env`.
+* **`TESTNET` dan `LIVE` dinonaktifkan** oleh aplikasi. Memilih salah satunya akan menghentikan startup dengan pesan error; `ENABLE_LIVE_TRADING=true` tidak mengaktifkan order.
+* Modul `risk_manager.py` hanya menyediakan kalkulasi awal. Batas posisi, kill switch, saldo akun, aturan lot, stop loss, dan take profit belum terhubung ke executor exchange.
 
 ---
 
@@ -75,7 +73,7 @@ Bot memiliki 3 mode operasi terisolasi di [`config.py`](file:///data/data/com.te
 
 ### Langkah 1: Masuk ke Direktori Proyek
 ```bash
-cd ~/binance-prediction-bot/btc_prediction_bot
+cd ~/binance-prediction-bot
 ```
 
 ### Langkah 2: Buat File `.env`
@@ -105,7 +103,7 @@ python3 -m unittest discover -s tests -p "test_*.py"
 ## 5. Struktur Berkas
 
 ```
-btc_prediction_bot/
+binance-prediction-bot/
 ├── main.py              # Aplikasi dashboard real-time terminal
 ├── config.py            # Konfigurasi & parameter kuantitatif
 ├── binance_client.py    # Client REST API Binance Futures USDT-M

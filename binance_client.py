@@ -21,7 +21,12 @@ class BinanceFuturesClient:
     ):
         self.api_key = api_key or config.BINANCE_API_KEY
         self.api_secret = api_secret or config.BINANCE_API_SECRET
-        self.base_url = base_url or config.BASE_URL
+        if base_url:
+            self.base_url = base_url
+        elif config.TRADING_MODE == "TESTNET":
+            self.base_url = config.FUTURES_TESTNET_URL
+        else:
+            self.base_url = config.FUTURES_MAINNET_URL
         self.session = requests.Session()
         self.session.headers.update({
             "User-Agent": "BtcPredictionBot/1.0 (Termux/Linux)",
@@ -29,6 +34,17 @@ class BinanceFuturesClient:
         })
         self.time_offset: int = 0
         self._sync_server_time()
+
+    def _market_data_endpoints(self, futures_path: str, spot_mirror_path: str = "") -> List[str]:
+        """Return endpoints consistent with the selected Futures environment."""
+        futures_url = f"{self.base_url}{futures_path}"
+        if config.TRADING_MODE == "TESTNET":
+            # Never silently substitute production market data in testnet mode.
+            return [futures_url]
+        endpoints = [futures_url]
+        if spot_mirror_path:
+            endpoints.append(f"https://data-api.binance.vision{spot_mirror_path}")
+        return endpoints
 
     def _sync_server_time(self) -> None:
         """Menghitung perbedaan waktu antara perangkat lokal dan server Binance"""
@@ -64,11 +80,9 @@ class BinanceFuturesClient:
         Mengambil data candlestick resmi dari Binance Futures USDT-M dengan failover otomatis
         ke mirror resmi Binance Vision (anti-blokir ISP di Indonesia).
         """
-        endpoints = [
-            "https://data-api.binance.vision/api/v3/klines",
-            f"{self.base_url}/fapi/v1/klines",
-            "https://testnet.binancefuture.com/fapi/v1/klines"
-        ]
+        endpoints = self._market_data_endpoints(
+            "/fapi/v1/klines", "/api/v3/klines"
+        )
         params = {"symbol": symbol, "interval": interval, "limit": limit}
 
         for ep in endpoints:
@@ -126,11 +140,9 @@ class BinanceFuturesClient:
         Mengambil bid price, ask price, dan spread aktual di Binance Futures dengan failover mirror.
         Returns: (bid, ask, spread_in_usdt)
         """
-        endpoints = [
-            "https://data-api.binance.vision/api/v3/ticker/bookTicker",
-            f"{self.base_url}/fapi/v1/ticker/bookTicker",
-            "https://testnet.binancefuture.com/fapi/v1/ticker/bookTicker"
-        ]
+        endpoints = self._market_data_endpoints(
+            "/fapi/v1/ticker/bookTicker", "/api/v3/ticker/bookTicker"
+        )
         params = {"symbol": symbol}
         for ep in endpoints:
             try:
@@ -139,19 +151,20 @@ class BinanceFuturesClient:
                     data = resp.json()
                     bid = float(data.get("bidPrice", 0.0))
                     ask = float(data.get("askPrice", 0.0))
+                    if bid <= 0.0 or ask <= 0.0 or ask < bid:
+                        continue
                     spread = round(max(0.0, ask - bid), 2)
                     return bid, ask, spread
             except Exception:
                 continue
-        return 0.0, 0.0, 0.0
+        # Infinite spread makes downstream guards fail closed when no book is available.
+        return 0.0, 0.0, float("inf")
 
     def test_connection(self) -> Tuple[bool, str, float]:
         """Menguji koneksi ke endpoint Binance Futures dan membaca harga terakhir"""
-        endpoints = [
-            "https://data-api.binance.vision/api/v3/ticker/price",
-            f"{self.base_url}/fapi/v1/ticker/price",
-            "https://testnet.binancefuture.com/fapi/v1/ticker/price"
-        ]
+        endpoints = self._market_data_endpoints(
+            "/fapi/v1/ticker/price", "/api/v3/ticker/price"
+        )
         params = {"symbol": config.SYMBOL}
         for ep in endpoints:
             try:

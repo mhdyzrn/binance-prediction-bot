@@ -3,13 +3,8 @@ import config
 
 class RiskManager:
     """
-    Manajer Risiko Kuantitatif (Risk & Position Sizing Engine).
-    Menerapkan:
-    - Zero-Martingale Policy (Dilarang melipatgandakan posisi saat rugi).
-    - ATR-based Stop Loss & Take Profit.
-    - Kill Switch jika drawdown sesi melebihi batas.
-    - Pembatasan posisi aktif (Maksimal 1 posisi).
-    - Blokade eksekusi ketat jika mode adalah SIGNAL_ONLY.
+    Kalkulator sizing awal. Tidak mengotorisasi atau mengelola posisi exchange.
+    Order tetap ditolak sampai tersedia executor dan sinkronisasi posisi/saldo.
     """
 
     def __init__(self, initial_capital: float = 100.0):
@@ -25,50 +20,11 @@ class RiskManager:
         current_spread: float,
         current_atr: float
     ) -> Dict[str, Any]:
-        """Memvalidasi apakah pembukaan posisi baru diizinkan oleh aturan risiko"""
-        # 1. Mode SIGNAL_ONLY tidak pernah boleh mengeksekusi order
-        if config.TRADING_MODE == "SIGNAL_ONLY":
-            return {
-                "allowed": False,
-                "reason": "Mode saat ini adalah SIGNAL_ONLY (Hanya analisis dan prediksi, eksekusi dinonaktifkan)."
-            }
-
-        # 2. Cek status Kill Switch
-        if self.is_kill_switch_triggered:
-            return {
-                "allowed": False,
-                "reason": "KILL SWITCH AKTIF: Batas maksimal drawdown terlampaui. Trading dihentikan otomatis."
-            }
-
-        # 3. Cek jumlah posisi aktif
-        if self.active_positions_count >= config.MAX_ACTIVE_POSITIONS:
-            return {
-                "allowed": False,
-                "reason": f"Posisi aktif sudah mencapai batas maksimal ({config.MAX_ACTIVE_POSITIONS})."
-            }
-
-        # 4. Filter Spread Melebar
-        if current_spread > config.MAX_SPREAD_USDT:
-            return {
-                "allowed": False,
-                "reason": f"Spread pasar melebar (${current_spread:.2f} > ${config.MAX_SPREAD_USDT:.2f})."
-            }
-
-        # 5. Filter Volatilitas Minimal
-        if current_atr < config.MIN_ATR_THRESHOLD:
-            return {
-                "allowed": False,
-                "reason": f"ATR terlalu rendah (${current_atr:.2f} < ${config.MIN_ATR_THRESHOLD:.2f})."
-            }
-
-        # 6. Sinyal harus tegas UP atau DOWN
-        if prediction not in ["UP", "DOWN"]:
-            return {
-                "allowed": False,
-                "reason": "Prediksi berstatus NEUTRAL."
-            }
-
-        return {"allowed": True, "reason": "Semua syarat manajemen risiko terpenuhi."}
+        """Always refuse orders until exchange execution and position tracking exist."""
+        return {
+            "allowed": False,
+            "reason": "Eksekusi Futures dinonaktifkan: order executor dan pelacakan posisi exchange belum tersedia."
+        }
 
     def calculate_levels_and_size(
         self,
@@ -81,6 +37,10 @@ class RiskManager:
         Menghitung level Stop Loss, Take Profit, dan Nominal Posisi berdasarkan ATR.
         Anti-Martingale: Ukuran risiko selalu tetap (1% per trade).
         """
+        if direction not in ("UP", "DOWN"):
+            raise ValueError("direction harus UP atau DOWN")
+        if entry_price <= 0 or atr <= 0 or account_balance <= 0:
+            raise ValueError("entry_price, atr, dan account_balance harus lebih besar dari nol")
         sl_distance = config.STOP_LOSS_ATR_MULT * atr
         tp_distance = config.TAKE_PROFIT_ATR_MULT * atr
 

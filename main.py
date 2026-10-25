@@ -16,6 +16,11 @@ class BtcPredictionApp:
     """
 
     def __init__(self):
+        if config.TRADING_MODE != "SIGNAL_ONLY":
+            raise RuntimeError(
+                f"TRADING_MODE={config.TRADING_MODE} is disabled: this Futures app has no order "
+                "executor or exchange-backed position management. Use SIGNAL_ONLY."
+            )
         self.client = BinanceFuturesClient()
         self.strategy = QuantitativeStrategy()
         self.engine = PredictionEngine(log_filepath="prediction_history.json")
@@ -170,7 +175,7 @@ class BtcPredictionApp:
 
                 # Ambil candle tertutup
                 closed_candles = self.client.get_closed_klines(limit=65)
-                _, _, spread = self.client.get_order_book_spread()
+                bid, ask, spread = self.client.get_order_book_spread()
 
                 if closed_candles:
                     latest_closed = closed_candles[-1]
@@ -197,28 +202,34 @@ class BtcPredictionApp:
 
                         pred_dir = eval_res.get("prediction", "NEUTRAL")
                         if pred_dir in ["UP", "DOWN"]:
+                            if bid <= 0.0 or ask <= 0.0:
+                                # Never create a paper fill from a missing/stale order book.
+                                time.sleep(1.0)
+                                continue
+                            # Model the executable side of the book after the signal is known.
+                            entry_price = ask if pred_dir == "UP" else bid
+                            prediction_time = time.time()
                             # Catat prediksi baru
                             rec = self.engine.record_prediction(
                                 symbol=config.SYMBOL,
                                 category=pred_dir,
-                                entry_price=curr_price,
+                                entry_price=entry_price,
                                 score=eval_res.get("score", 0.0),
                                 reason=eval_res.get("reason", ""),
                                 metrics=current_metrics,
-                                candle_timestamp=closed_time
+                                candle_timestamp=prediction_time
                             )
                             self.latest_prediction_record = rec
                             self.cooldown_until = now + (config.COOLDOWN_MINUTES * 60)
 
-                            # Validasi & Eksekusi Order jika mode TESTNET atau LIVE
+                            # Deliberately no Futures order execution is implemented.
                             risk_check = self.risk_manager.validate_trade_allowed(
                                 pred_dir,
                                 current_spread=spread,
                                 current_atr=current_metrics.get("atr14", 20.0)
                             )
-                            if risk_check["allowed"] and config.TRADING_MODE in ["TESTNET", "LIVE"]:
-                                # Eksekusi order testnet/live
-                                pass
+                            if risk_check["allowed"]:
+                                raise RuntimeError("Order execution is not implemented; refusing to trade.")
 
                     self.render_terminal_dashboard(
                         current_price=curr_price,

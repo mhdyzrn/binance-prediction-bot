@@ -24,13 +24,11 @@ load_env_file(os.path.join(os.path.dirname(__file__), ".env"))
 # -------------------------------------------------------------
 # MODE OPERASI & KEAMANAN
 # -------------------------------------------------------------
-# Pilihan: SIGNAL_ONLY (Default), TESTNET, LIVE
+# Aplikasi Futures hanya mengizinkan SIGNAL_ONLY sampai executor tersedia.
 TRADING_MODE = os.getenv("TRADING_MODE", "SIGNAL_ONLY").upper()
 
-# Perlindungan ganda untuk LIVE: Wajib konfirmasi eksplisit ENABLE_LIVE_TRADING=true
+# Kept for compatibility; LIVE is currently rejected by the Futures application.
 ENABLE_LIVE_TRADING = os.getenv("ENABLE_LIVE_TRADING", "false").lower() == "true"
-if TRADING_MODE == "LIVE" and not ENABLE_LIVE_TRADING:
-    TRADING_MODE = "SIGNAL_ONLY"
 
 # Kredensial Binance API
 BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "")

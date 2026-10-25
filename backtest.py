@@ -2,7 +2,7 @@ import sys
 import os
 import time
 import argparse
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 import config
 from binance_client import BinanceFuturesClient
 from strategy import QuantitativeStrategy
@@ -113,9 +113,12 @@ class QuantitativeBacktester:
                 continue
 
             last_entry_index = i
-            entry_price = candles[i]["close"]
+            # A signal is only available after candle i has closed. Model entry
+            # on the next candle's open instead of assuming a fill at that close.
+            entry_index = i + 1
+            entry_price = candles[entry_index]["open"]
             exit_price = candles[i + horizon]["close"]
-            entry_time = candles[i]["close_time"]
+            entry_time = candles[entry_index]["open_time"]
             exit_time = candles[i + horizon]["close_time"]
 
             # Price delta 5m kemudian
